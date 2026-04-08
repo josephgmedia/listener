@@ -1,6 +1,6 @@
 """
 Meeting Recorder — Local server
-Handles recording, Whisper transcription, Claude formatting.
+Records system audio + mic simultaneously, transcribes with Whisper, formats with Claude.
 Run this first, then open recorder.html in your browser.
 """
 
@@ -22,27 +22,27 @@ from urllib.parse import urlparse
 # ── Config ────────────────────────────────────────────────────────────────────
 WHISPER_MODEL   = "large"
 SAMPLE_RATE     = 48000
-CHANNELS        = 1        # Mono — Focusrite loopback doesn't support stereo
 OUTPUT_DIR      = Path("recordings")
 OUTPUT_DIR.mkdir(exist_ok=True)
 PORT            = 8765
-USE_FP16        = torch.cuda.is_available()  # Auto-detect GPU
+USE_FP16        = torch.cuda.is_available()
 
 # ── State ─────────────────────────────────────────────────────────────────────
-recording       = False
-audio_chunks    = []
-stop_event      = threading.Event()
-rec_thread      = None
-whisper_model   = None
-current_status  = "idle"
-current_device  = None
-last_summary    = ""
-last_transcript = ""
-last_saved_path = ""
-state_lock      = threading.Lock()
+recording           = False
+loopback_chunks     = []
+mic_chunks          = []
+stop_event          = threading.Event()
+rec_thread_loopback = None
+rec_thread_mic      = None
+whisper_model       = None
+current_status      = "idle"
+last_summary        = ""
+last_transcript     = ""
+last_saved_path     = ""
 
-# ── Audio device ──────────────────────────────────────────────────────────────
+# ── Device detection ──────────────────────────────────────────────────────────
 def get_loopback_device():
+    """Find best system audio loopback device across different machine configs."""
     devices = sd.query_devices()
     hostapis = sd.query_hostapis()
 
@@ -55,7 +55,7 @@ def get_loopback_device():
     if wasapi_index is None:
         return None, None
 
-    # Priority 1: Focusrite loopback (Analogue input via WASAPI — loopback enabled in Focusrite Control)
+    # Priority 1: Focusrite WASAPI loopback (enable in Focusrite Control)
     for i, d in enumerate(devices):
         if (d.get('hostapi') == wasapi_index
                 and 'analogue' in d['name'].lower()
@@ -63,20 +63,20 @@ def get_loopback_device():
                 and d['max_input_channels'] > 0):
             return i, d['name']
 
-    # Priority 2: VB-Cable Output if present
+    # Priority 2: VB-Cable Output
     for i, d in enumerate(devices):
         if (d.get('hostapi') == wasapi_index
                 and 'cable output' in d['name'].lower()
                 and d['max_input_channels'] > 0):
             return i, d['name']
 
-    # Priority 3: Stereo Mix — built-in Windows loopback on non-interface machines
+    # Priority 3: Stereo Mix (standard Windows loopback)
     for i, d in enumerate(devices):
         if ('stereo mix' in d['name'].lower()
                 and d['max_input_channels'] > 0):
             return i, d['name']
 
-    # Priority 4: Any WASAPI input that isnt a mic or analogue input
+    # Priority 4: Any WASAPI input that isn't a mic
     for i, d in enumerate(devices):
         if (d.get('hostapi') == wasapi_index
                 and d['max_input_channels'] > 0
@@ -86,6 +86,37 @@ def get_loopback_device():
             return i, d['name']
 
     return None, None
+
+
+def get_mic_device():
+    """Find the default mic input device."""
+    try:
+        default = sd.query_devices(kind='input')
+        devices = sd.query_devices()
+        for i, d in enumerate(devices):
+            if d['name'] == default['name'] and d['max_input_channels'] > 0:
+                return i, d['name']
+    except Exception:
+        pass
+
+    # Fallback: first available input
+    devices = sd.query_devices()
+    for i, d in enumerate(devices):
+        if d['max_input_channels'] > 0:
+            return i, d['name']
+
+    return None, None
+
+
+def get_device_sample_rate(device_id, preferred=48000):
+    """Find a working sample rate for a given device."""
+    for rate in [preferred, 44100, 16000, 22050, 96000]:
+        try:
+            sd.check_input_settings(device=device_id, samplerate=rate, channels=1)
+            return rate
+        except Exception:
+            continue
+    return preferred
 
 
 def get_all_devices():
@@ -105,49 +136,117 @@ def get_all_devices():
 
 
 # ── Recording ─────────────────────────────────────────────────────────────────
-def audio_callback(indata, frames, time, status):
+def loopback_callback(indata, frames, time, status):
     if recording:
-        audio_chunks.append(indata.copy())
+        loopback_chunks.append(indata.copy())
 
 
-def do_recording(device_id):
+def mic_callback(indata, frames, time, status):
+    if recording:
+        mic_chunks.append(indata.copy())
+
+
+def do_loopback_recording(device_id, sample_rate):
     global current_status
     try:
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
+        use_wasapi = False
+        devices = sd.query_devices()
+        hostapis = sd.query_hostapis()
+        if 'hostapi' in devices[device_id]:
+            api_name = hostapis[devices[device_id]['hostapi']]['name'].lower()
+            use_wasapi = 'wasapi' in api_name
+
+        kwargs = dict(
+            samplerate=sample_rate,
+            channels=1,
             dtype='float32',
             device=device_id,
-            callback=audio_callback
+            callback=loopback_callback
+        )
+        if use_wasapi and ('analogue' in devices[device_id]['name'].lower() 
+                           or 'focusrite' in devices[device_id]['name'].lower()):
+            kwargs['extra_settings'] = sd.WasapiSettings(True)
+
+        with sd.InputStream(**kwargs):
+            while not stop_event.is_set():
+                sd.sleep(100)
+    except Exception as e:
+        print(f"Loopback recording error: {e}")
+
+
+def do_mic_recording(device_id, sample_rate):
+    try:
+        with sd.InputStream(
+            samplerate=sample_rate,
+            channels=1,
+            dtype='float32',
+            device=device_id,
+            callback=mic_callback
         ):
             while not stop_event.is_set():
                 sd.sleep(100)
     except Exception as e:
-        current_status = "error"
-        print(f"Recording error: {e}")
+        print(f"Mic recording error: {e}")
+
+
+def mix_audio(chunks_a, rate_a, chunks_b, rate_b, target_rate):
+    """Mix two mono audio streams, resampling if needed, returning mono mix."""
+    def to_array(chunks, rate):
+        if not chunks:
+            return np.array([], dtype=np.float32)
+        data = np.concatenate(chunks, axis=0)
+        if data.ndim == 2:
+            data = data.mean(axis=1)
+        # Resample to target_rate if needed
+        if rate != target_rate:
+            ratio = target_rate / rate
+            new_len = int(len(data) * ratio)
+            data = np.interp(
+                np.linspace(0, len(data), new_len),
+                np.arange(len(data)),
+                data
+            ).astype(np.float32)
+        return data
+
+    a = to_array(chunks_a, rate_a)
+    b = to_array(chunks_b, rate_b)
+
+    # Pad shorter stream
+    max_len = max(len(a), len(b))
+    if len(a) < max_len:
+        a = np.pad(a, (0, max_len - len(a)))
+    if len(b) < max_len:
+        b = np.pad(b, (0, max_len - len(b)))
+
+    # Mix and normalise
+    mixed = a + b
+    peak = np.max(np.abs(mixed))
+    if peak > 1.0:
+        mixed = mixed / peak
+
+    return mixed
 
 
 # ── Process after stop ────────────────────────────────────────────────────────
-def process_recording(role, fmt):
+def process_recording(role, fmt, loopback_rate, mic_rate):
     global current_status, last_summary, last_transcript, last_saved_path, whisper_model
 
     current_status = "processing"
 
-    if not audio_chunks:
-        print("No audio chunks captured.")
+    if not loopback_chunks and not mic_chunks:
+        print("No audio captured.")
         current_status = "error"
         return
 
-    # Save audio — flatten mono (n,1) → (n,)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    audio_data = np.concatenate(audio_chunks, axis=0)
-    if audio_data.ndim == 2 and audio_data.shape[1] == 1:
-        audio_data = audio_data.flatten()
-    duration = len(audio_data) / SAMPLE_RATE
 
-    # Save as MP3 at 128kbps — WAV is enormous for long meetings
+    print(f"Mixing audio (loopback: {len(loopback_chunks)} chunks, mic: {len(mic_chunks)} chunks)...")
+    mixed = mix_audio(loopback_chunks, loopback_rate, mic_chunks, mic_rate, SAMPLE_RATE)
+    duration = len(mixed) / SAMPLE_RATE
+
+    # Save as MP3 128kbps
     audio_path = OUTPUT_DIR / f"audio_{timestamp}.mp3"
-    audio_int16 = (audio_data * 32767).astype(np.int16)
+    audio_int16 = (mixed * 32767).astype(np.int16)
     segment = AudioSegment(
         audio_int16.tobytes(),
         frame_rate=SAMPLE_RATE,
@@ -159,7 +258,8 @@ def process_recording(role, fmt):
     print(f"Audio saved: {audio_path} ({duration:.1f}s, {size_mb:.1f}MB)")
 
     # Transcribe
-    print(f"Loading Whisper {WHISPER_MODEL} (fp16={USE_FP16}, cuda={torch.cuda.is_available()}, device={torch.cuda.get_device_name(0) if torch.cuda.is_available() else chr(67)+chr(80)+chr(85)})...")
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    print(f"Loading Whisper {WHISPER_MODEL} (fp16={USE_FP16}, device={gpu_name})...")
     if whisper_model is None:
         whisper_model = whisper.load_model(WHISPER_MODEL)
     print("Transcribing...")
@@ -208,7 +308,7 @@ Raw transcript:
         last_summary = message.content[0].text
     except Exception as e:
         print(f"Claude error: {e}")
-        last_summary = "### Claude Unavailable\n\nTranscript captured but Claude formatting failed. Check your API credits at console.anthropic.com\n\nError: " + str(e)
+        last_summary = "### Claude Unavailable\n\nTranscript captured but formatting failed. Check your API credits.\n\nError: " + str(e)
 
     # Save markdown
     out_path = OUTPUT_DIR / f"meeting_{timestamp}.md"
@@ -271,12 +371,16 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/status":
-            device_id, device_name = get_loopback_device()
+            loopback_id, loopback_name = get_loopback_device()
+            mic_id, mic_name = get_mic_device()
             self.send_json({
                 "status": current_status,
-                "device": device_name or "Not found",
-                "device_id": device_id,
-                "chunks": len(audio_chunks),
+                "loopback_device": loopback_name or "Not found",
+                "loopback_device_id": loopback_id,
+                "mic_device": mic_name or "Not found",
+                "mic_device_id": mic_id,
+                "loopback_chunks": len(loopback_chunks),
+                "mic_chunks": len(mic_chunks),
                 "summary": last_summary,
                 "transcript": last_transcript,
                 "saved": last_saved_path
@@ -289,8 +393,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
-        global recording, stop_event, rec_thread, current_status
-        global audio_chunks, current_device, last_summary, last_transcript, last_saved_path
+        global recording, stop_event, rec_thread_loopback, rec_thread_mic
+        global current_status, loopback_chunks, mic_chunks
+        global last_summary, last_transcript, last_saved_path
 
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", 0))
@@ -301,25 +406,56 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"error": "Already recording"})
                 return
 
-            device_id = body.get("device_id")
-            if device_id is None:
-                device_id, _ = get_loopback_device()
-            if device_id is None:
-                self.send_json({"error": "No loopback device found"})
+            loopback_id, loopback_name = get_loopback_device()
+            mic_id, mic_name = get_mic_device()
+
+            if loopback_id is None and mic_id is None:
+                self.send_json({"error": "No audio devices found"})
                 return
 
-            # Reset state for new recording
-            audio_chunks.clear()
+            # Find working sample rates for each device
+            loopback_rate = get_device_sample_rate(loopback_id) if loopback_id is not None else SAMPLE_RATE
+            mic_rate = get_device_sample_rate(mic_id) if mic_id is not None else SAMPLE_RATE
+
+            # Reset state
+            loopback_chunks.clear()
+            mic_chunks.clear()
             last_summary = ""
             last_transcript = ""
             last_saved_path = ""
             stop_event.clear()
             recording = True
             current_status = "recording"
-            current_device = device_id
-            rec_thread = threading.Thread(target=do_recording, args=(device_id,), daemon=True)
-            rec_thread.start()
-            self.send_json({"ok": True, "status": "recording"})
+
+            print(f"Starting recording:")
+            if loopback_id is not None:
+                print(f"  Loopback: {loopback_name} (#{loopback_id}) @ {loopback_rate}Hz")
+                rec_thread_loopback = threading.Thread(
+                    target=do_loopback_recording,
+                    args=(loopback_id, loopback_rate),
+                    daemon=True
+                )
+                rec_thread_loopback.start()
+            else:
+                print("  No loopback device — capturing mic only")
+
+            if mic_id is not None:
+                print(f"  Mic: {mic_name} (#{mic_id}) @ {mic_rate}Hz")
+                rec_thread_mic = threading.Thread(
+                    target=do_mic_recording,
+                    args=(mic_id, mic_rate),
+                    daemon=True
+                )
+                rec_thread_mic.start()
+            else:
+                print("  No mic device found")
+
+            self.send_json({
+                "ok": True,
+                "status": "recording",
+                "loopback": loopback_name,
+                "mic": mic_name
+            })
 
         elif path == "/pause":
             recording = False
@@ -337,7 +473,18 @@ class Handler(BaseHTTPRequestHandler):
             recording = False
             stop_event.set()
             current_status = "processing"
-            t = threading.Thread(target=process_recording, args=(role, fmt), daemon=True)
+
+            # Get the rates used
+            loopback_id, _ = get_loopback_device()
+            mic_id, _ = get_mic_device()
+            loopback_rate = get_device_sample_rate(loopback_id) if loopback_id is not None else SAMPLE_RATE
+            mic_rate = get_device_sample_rate(mic_id) if mic_id is not None else SAMPLE_RATE
+
+            t = threading.Thread(
+                target=process_recording,
+                args=(role, fmt, loopback_rate, mic_rate),
+                daemon=True
+            )
             t.start()
             self.send_json({"ok": True, "status": "processing"})
 
@@ -346,19 +493,18 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 55)
     print("  MEETING RECORDER — Server")
-    print("=" * 50)
+    print("=" * 55)
 
-    device_id, device_name = get_loopback_device()
-    if device_id is not None:
-        print(f"  Loopback device: {device_name} (#{device_id})")
-    else:
-        print("  Warning: No loopback device found")
+    loopback_id, loopback_name = get_loopback_device()
+    mic_id, mic_name = get_mic_device()
 
-    print(f"  GPU acceleration: {USE_FP16}")
-    print(f"  Server running at http://localhost:{PORT}")
-    print(f"  Press Ctrl+C to stop\n")
+    print(f"  Loopback : {loopback_name or 'Not found'}" + (f" (#{loopback_id})" if loopback_id is not None else ""))
+    print(f"  Mic      : {mic_name or 'Not found'}" + (f" (#{mic_id})" if mic_id is not None else ""))
+    print(f"  GPU      : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None — using CPU'}")
+    print(f"  Server   : http://localhost:{PORT}")
+    print(f"  Ctrl+C to stop\n")
 
     server = HTTPServer(("localhost", PORT), Handler)
     try:

@@ -477,8 +477,10 @@ textarea::placeholder { color: var(--muted); }
     <div class="panel-block">
       <div class="label">Capture device</div>
       <div class="device-name" id="deviceName">
-        Detecting...
-        <span id="deviceSub"></span>
+        <span style="color:var(--accent2);font-size:9px;letter-spacing:1px">LOOPBACK</span><br>
+        <span id="loopbackName">Detecting...</span><br>
+        <span style="color:var(--accent2);font-size:9px;letter-spacing:1px;margin-top:6px;display:block">MIC</span><br>
+        <span id="micName">Detecting...</span>
       </div>
     </div>
 
@@ -593,8 +595,8 @@ async function checkServer() {
     document.getElementById('serverDown').classList.remove('visible');
     document.getElementById('serverPill').textContent = 'Server: connected';
     document.getElementById('serverPill').classList.add('connected');
-    document.getElementById('deviceName').textContent = data.device || 'Unknown';
-    document.getElementById('deviceSub').textContent = data.device_id != null ? `Device #${data.device_id}` : '';
+    document.getElementById('loopbackName').textContent = data.loopback_device || 'Not found';
+    document.getElementById('micName').textContent = data.mic_device || 'Not found';
     // Connected — poll status every 5s to keep device info fresh but never show overlay again
     setTimeout(refreshStatus, 5000);
   } catch(e) {
