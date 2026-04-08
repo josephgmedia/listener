@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Listener">
+<title>Listener</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Bebas+Neue&display=swap');
+
+:root {
+  --bg: #0a0a0a;
+  --surface: #111;
+  --surface2: #181818;
+  --border: #222;
+  --border2: #2e2e2e;
+  --accent: #c8ff00;
+  --accent2: #8aad00;
+  --text: #e2e2e2;
+  --muted: #4a4a4a;
+  --muted2: #777;
+  --red: #ff3b3b;
+  --orange: #ff8800;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  height: 100%;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+/* ── SHELL ───────────────────────────── */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+/* ── HEADER ──────────────────────────── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px;
+  letter-spacing: 4px;
+  color: var(--accent);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.dot.recording { background: var(--red); animation: blink 1s infinite; }
+.dot.paused    { background: var(--orange); }
+.dot.done      { background: var(--accent); }
+.dot.processing { background: var(--accent2); animation: blink 0.6s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.timer {
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--muted2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── TABS ────────────────────────────── */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.tab {
+  flex: 1;
+  padding: 12px;
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted2);
+  text-align: center;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  user-select: none;
+}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* ── PANELS ──────────────────────────── */
+.panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+.panel.active { display: flex; }
+
+/* ── SETUP PANEL ─────────────────────── */
+.setup-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.field {
+  margin-bottom: 20px;
+}
+
+.field-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+textarea, input[type="password"] {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  padding: 12px;
+  resize: none;
+  outline: none;
+  line-height: 1.6;
+  -webkit-appearance: none;
+}
+textarea:focus, input:focus { border-color: var(--accent2); }
+textarea::placeholder, input::placeholder { color: var(--muted); }
+
+.format-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.fmt-btn {
+  padding: 12px 8px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted2);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+  min-height: 52px;
+}
+.fmt-btn.selected {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(200,255,0,0.05);
+}
+
+/* ── RECORD PANEL ────────────────────── */
+.record-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.transcript-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 10px;
+  color: var(--muted);
+  text-align: center;
+}
+.empty-icon { font-size: 44px; opacity: 0.2; margin-bottom: 6px; }
+.empty-state p { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+.empty-state small { font-size: 9px; opacity: 0.5; }
+
+.segment {
+  margin-bottom: 14px;
+  animation: fadeUp 0.2s ease;
+}
+@keyframes fadeUp { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+
+.seg-time {
+  font-size: 9px;
+  color: var(--muted2);
+  letter-spacing: 1px;
+  margin-bottom: 3px;
+}
+
+.seg-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.interim-bar {
+  padding: 8px 20px;
+  font-size: 13px;
+  color: var(--muted2);
+  font-style: italic;
+  min-height: 36px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ── BIG RECORD BUTTON AREA ──────────── */
+.record-controls {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.big-btn {
+  width: 100%;
+  padding: 18px;
+  border-radius: 12px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px;
+  letter-spacing: 3px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+  margin-bottom: 10px;
+}
+.big-btn.start { background: var(--accent); color: #000; }
+.big-btn.stop { background: var(--red); color: #fff; }
+.big-btn.pause { background: var(--surface2); color: var(--orange); border: 1px solid var(--orange); }
+.big-btn:active { transform: scale(0.97); }
+.big-btn:disabled { opacity: 0.3; }
+
+.small-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.small-btn {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+.small-btn:active { opacity: 0.7; }
+.small-btn.danger { border-color: #2a1515; color: #aa3333; }
+
+.word-bar {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  padding: 0 0 10px;
+}
+
+/* ── SUMMARY PANEL ───────────────────── */
+.summary-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.summary-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.summary-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+}
+.summary-placeholder p {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 2.2;
+}
+
+.summary-body h3 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 16px;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin: 18px 0 8px;
+}
+.summary-body h3:first-child { margin-top: 0; }
+.summary-body ul { list-style: none; padding: 0; }
+.summary-body li {
+  padding: 6px 0 6px 14px;
+  position: relative;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #ccc;
+  border-bottom: 1px solid var(--border);
+}
+.summary-body li:last-child { border-bottom: none; }
+.summary-body li::before { content:'›'; position:absolute; left:0; color:var(--accent); }
+.summary-body p { font-size: 13px; color: #bbb; line-height: 1.7; margin-bottom: 8px; }
+
+.processing-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: var(--muted2);
+}
+.spin {
+  width: 24px; height: 24px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to{transform:rotate(360deg)} }
+.processing-state p { font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; }
+
+.summary-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  display: none;
+}
+.summary-footer.visible { display: block; }
+
+.copy-btn {
+  width: 100%;
+  padding: 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: all 0.15s;
+}
+.copy-btn:active { border-color: var(--accent); color: var(--accent); }
+
+/* ── TOAST ───────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: calc(20px + var(--safe-bottom));
+  left: 50%;
+  transform: translateX(-50%) translateY(60px);
+  background: var(--accent);
+  color: #000;
+  padding: 10px 20px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  border-radius: 20px;
+  transition: transform 0.25s ease;
+  pointer-events: none;
+  z-index: 999;
+  white-space: nowrap;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── WAVEFORM ────────────────────────── */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+}
+.wb {
+  width: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  height: 3px;
+  transition: height 0.08s ease;
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <header>
+    <div class="logo">LISTENER</div>
+    <div class="header-right">
+      <div class="waveform" id="waveform">
+        <div class="wb"></div><div class="wb"></div><div class="wb"></div>
+        <div class="wb"></div><div class="wb"></div><div class="wb"></div>
+      </div>
+      <div class="status-row">
+        <div class="dot" id="dot"></div>
+        <span id="statusText">READY</span>
+      </div>
+      <div class="timer" id="timer">00:00</div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-setup" onclick="switchTab('setup')">Setup</div>
+    <div class="tab" id="tab-record" onclick="switchTab('record')">Record</div>
+    <div class="tab" id="tab-summary" onclick="switchTab('summary')">Summary</div>
+  </div>
+
+  <!-- SETUP TAB -->
+  <div class="panel active" id="panel-setup">
+    <div class="setup-scroll">
+
+      <div class="field">
+        <div class="field-label">Claude API Key</div>
+        <input type="password" id="apiKey" placeholder="sk-ant-..." 
+          oninput="saveKey(this.value)">
+        <div style="font-size:9px;color:var(--muted);margin-top:6px;letter-spacing:1px">
+          Stored locally on this device only
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Your role in this meeting</div>
+        <textarea id="roleInput" rows="4" 
+          placeholder="e.g. Freelancer pitching projection gig. Capture: brief, timeline, budget signals, my commitments."></textarea>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Output format</div>
+        <div class="format-grid">
+          <div class="fmt-btn selected" data-fmt="brief" onclick="selectFmt(this)">Quick Debrief</div>
+          <div class="fmt-btn" data-fmt="detailed" onclick="selectFmt(this)">Full Breakdown</div>
+          <div class="fmt-btn" data-fmt="actions" onclick="selectFmt(this)">Actions Only</div>
+          <div class="fmt-btn" data-fmt="email" onclick="selectFmt(this)">Follow-up Email</div>
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">How it works</div>
+        <div style="font-size:11px;color:var(--muted2);line-height:1.8">
+          Uses your device mic to capture the room.<br>
+          Tap Record tab → Start → speak → Stop.<br>
+          Claude formats your notes automatically.<br><br>
+          <span style="color:var(--muted)">Best for in-person meetings.<br>
+          No bots. Nothing joins your call.</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- RECORD TAB -->
+  <div class="panel" id="panel-record">
+    <div class="record-panel">
+      <div class="transcript-scroll" id="transcriptScroll">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">🎙</div>
+          <p>Tap Start to begin</p>
+          <small>Mic captures the room</small>
+        </div>
+      </div>
+      <div class="interim-bar" id="interim"></div>
+      <div class="record-controls">
+        <div class="word-bar">
+          <span id="wordCount">0 words</span>
+          <span id="segCount">0 segments</span>
+        </div>
+        <button class="big-btn start" id="mainBtn" onclick="handleMainBtn()">START</button>
+        <div class="small-btns">
+          <button class="small-btn" id="pauseBtn" onclick="togglePause()" disabled>⏸ Pause</button>
+          <button class="small-btn danger" onclick="clearAll()">✕ Clear</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUMMARY TAB -->
+  <div class="panel" id="panel-summary">
+    <div class="summary-panel">
+      <div class="summary-scroll" id="summaryScroll">
+        <div class="summary-placeholder">
+          <p>Record a meeting first.<br><br>Claude will format<br>your notes here.</p>
+        </div>
+      </div>
+      <div class="summary-footer" id="summaryFooter">
+        <button class="copy-btn" onclick="copySummary()">Copy Summary</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+
+// ── State ──────────────────────────────────────────────────
+let recognition  = null;
+let isListening  = false;
+let isPaused     = false;
+let segments     = [];
+let startTs      = null;
+let elapsed      = 0;
+let timerInt     = null;
+let waveInt      = null;
+let summaryRaw   = '';
+let selectedFmt  = 'brief';
+let mainBtnState = 'start'; // start | stop
+
+// ── Boot ───────────────────────────────────────────────────
+window.onload = () => {
+  // Restore API key
+  const saved = localStorage.getItem('listener_api_key');
+  if (saved) document.getElementById('apiKey').value = saved;
+};
+
+function saveKey(val) {
+  localStorage.setItem('listener_api_key', val);
+}
+
+// ── Tabs ───────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+function selectFmt(el) {
+  document.querySelectorAll('.fmt-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedFmt = el.dataset.fmt;
+}
+
+// ── Speech recognition ─────────────────────────────────────
+function initRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Speech recognition not supported'); return null; }
+
+  const r = new SR();
+  r.continuous = true;
+  r.interimResults = true;
+  r.lang = 'en-AU';
+
+  r.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        addSegment(e.results[i][0].transcript.trim());
+      } else {
+        interim += e.results[i][0].transcript;
+      }
+    }
+    document.getElementById('interim').textContent = interim;
+  };
+
+  r.onerror = (e) => {
+    if (e.error === 'no-speech') return;
+    if (e.error === 'not-allowed') { toast('Mic access denied — check Safari settings'); return; }
+    toast('Mic error: ' + e.error);
+  };
+
+  r.onend = () => {
+    if (isListening && !isPaused) {
+      try { r.start(); } catch(ex) {}
+    }
+  };
+
+  return r;
+}
+
+// ── Controls ───────────────────────────────────────────────
+function handleMainBtn() {
+  if (mainBtnState === 'start') {
+    startRecording();
+  } else {
+    stopAndSummarise();
+  }
+}
+
+function startRecording() {
+  recognition = initRecognition();
+  if (!recognition) return;
+
+  try { recognition.start(); } catch(e) { toast('Could not start mic'); return; }
+
+  isListening = true;
+  isPaused = false;
+  segments = [];
+  startTs = Date.now();
+  elapsed = 0;
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('interim').textContent = '';
+
+  mainBtnState = 'stop';
+  const mb = document.getElementById('mainBtn');
+  mb.textContent = 'STOP & SUMMARISE';
+  mb.className = 'big-btn stop';
+
+  document.getElementById('pauseBtn').disabled = false;
+
+  setStatus('recording', 'REC');
+  startTimer();
+  startWave();
+
+  // Switch to record tab
+  switchTab('record');
+}
+
+async function stopAndSummarise() {
+  if (!isListening) return;
+
+  isListening = false;
+  isPaused = false;
+  try { recognition.stop(); } catch(e) {}
+
+  stopTimer();
+  stopWave();
+
+  document.getElementById('interim').textContent = '';
+  document.getElementById('pauseBtn').disabled = true;
+  mainBtnState = 'start';
+  const mb = document.getElementById('mainBtn');
+  mb.textContent = 'START';
+  mb.className = 'big-btn start';
+  mb.disabled = true;
+
+  setStatus('processing', 'PROCESSING');
+
+  if (segments.length === 0) {
+    toast('Nothing recorded');
+    mb.disabled = false;
+    setStatus('', 'READY');
+    return;
+  }
+
+  // Switch to summary tab and show loading
+  switchTab('summary');
+  document.getElementById('summaryScroll').innerHTML = `
+    <div class="processing-state">
+      <div class="spin"></div>
+      <p>Claude formatting...</p>
+    </div>`;
+  document.getElementById('summaryFooter').classList.remove('visible');
+
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) {
+    document.getElementById('summaryScroll').innerHTML = `
+      <div class="summary-placeholder">
+        <p>Add your Claude API key<br>in the Setup tab first.</p>
+      </div>`;
+    mb.disabled = false;
+    setStatus('', 'READY');
+    toast('No API key — check Setup tab');
+    return;
+  }
+
+  const role = document.getElementById('roleInput').value.trim() || 'Meeting participant';
+  const transcript = segments.map(s => `[${s.time}] ${s.text}`).join('\n');
+
+  const formatInstructions = {
+    brief:    'Create a concise debrief: key topics, key decisions, and action items.',
+    detailed: 'Create a detailed breakdown: Meeting Overview, Key Discussion Points, Their Asks, My Commitments, Open Questions, Next Steps.',
+    actions:  'Extract ONLY action items and commitments — mine and theirs. Clear list format.',
+    email:    'Draft a professional follow-up email I can send to the other party. Summarise what was discussed and confirm next steps.'
+  };
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 1500,
+        system: `You are a meeting assistant for Joe, a freelance motion designer, videographer, photographer, and musician based in Sydney, Australia. He works across projection design, animation, content creation, and video production. Format meeting transcripts clearly and practically. Use ### for section headings, bullet points with - for lists.`,
+        messages: [{
+          role: 'user',
+          content: `My role in this meeting: ${role}\n\nFormat requested: ${formatInstructions[selectedFmt]}\n\nRaw transcript:\n${transcript}`
+        }]
+      })
+    });
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    summaryRaw = data.content[0].text;
+    renderSummary(summaryRaw);
+    document.getElementById('summaryFooter').classList.add('visible');
+    setStatus('done', 'DONE');
+    toast('Summary ready');
+  } catch(e) {
+    document.getElementById('summaryScroll').innerHTML = `
+      <div class="summary-placeholder">
+        <p style="color:#aa3333">Error: ${e.message}</p>
+      </div>`;
+    setStatus('', 'ERROR');
+    toast('Claude error');
+  }
+
+  mb.disabled = false;
+}
+
+function togglePause() {
+  if (!isListening && !isPaused) return;
+  if (isPaused) {
+    isPaused = false;
+    isListening = true;
+    try { recognition.start(); } catch(e) {}
+    startTs = Date.now() - elapsed * 1000;
+    startTimer();
+    startWave();
+    setStatus('recording', 'REC');
+    document.getElementById('pauseBtn').textContent = '⏸ Pause';
+  } else {
+    isPaused = true;
+    isListening = false;
+    try { recognition.stop(); } catch(e) {}
+    stopTimer();
+    stopWave();
+    setStatus('paused', 'PAUSED');
+    document.getElementById('pauseBtn').textContent = '▶ Resume';
+  }
+}
+
+function clearAll() {
+  isListening = false;
+  isPaused = false;
+  segments = [];
+  elapsed = 0;
+  summaryRaw = '';
+  try { if (recognition) recognition.stop(); } catch(e) {}
+  stopTimer();
+  stopWave();
+
+  document.getElementById('transcriptScroll').innerHTML = `
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">🎙</div>
+      <p>Tap Start to begin</p>
+      <small>Mic captures the room</small>
+    </div>`;
+  document.getElementById('interim').textContent = '';
+  document.getElementById('summaryScroll').innerHTML = `
+    <div class="summary-placeholder">
+      <p>Record a meeting first.<br><br>Claude will format<br>your notes here.</p>
+    </div>`;
+  document.getElementById('summaryFooter').classList.remove('visible');
+  document.getElementById('timer').textContent = '00:00';
+  document.getElementById('wordCount').textContent = '0 words';
+  document.getElementById('segCount').textContent = '0 segments';
+
+  mainBtnState = 'start';
+  const mb = document.getElementById('mainBtn');
+  mb.textContent = 'START';
+  mb.className = 'big-btn start';
+  mb.disabled = false;
+  document.getElementById('pauseBtn').disabled = true;
+  document.getElementById('pauseBtn').textContent = '⏸ Pause';
+  setStatus('', 'READY');
+}
+
+// ── Transcript ─────────────────────────────────────────────
+function addSegment(text) {
+  if (!text) return;
+  const time = formatElapsed(Math.floor((Date.now() - startTs) / 1000));
+  segments.push({ time, text });
+
+  const area = document.getElementById('transcriptScroll');
+  const div = document.createElement('div');
+  div.className = 'segment';
+  div.innerHTML = `<div class="seg-time">${time}</div><div class="seg-text">${text}</div>`;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+
+  const words = segments.reduce((a, s) => a + s.text.split(' ').length, 0);
+  document.getElementById('wordCount').textContent = words + ' words';
+  document.getElementById('segCount').textContent = segments.length + ' segments';
+}
+
+// ── Summary ────────────────────────────────────────────────
+function renderSummary(text) {
+  const lines = text.split('\n');
+  let html = '<div class="summary-body">';
+  let inList = false;
+
+  lines.forEach(line => {
+    const h  = line.match(/^#{1,3}\s+(.+)/);
+    const li = line.match(/^[-•*]\s+(.+)/);
+    const nl = line.match(/^\d+\.\s+(.+)/);
+    if (h) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${h[1]}</h3>`;
+    } else if (li || nl) {
+      const c = li ? li[1] : nl[1];
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${c}</li>`;
+    } else if (line.trim() === '') {
+      if (inList) { html += '</ul>'; inList = false; }
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<p>${line}</p>`;
+    }
+  });
+
+  if (inList) html += '</ul>';
+  html += '</div>';
+  document.getElementById('summaryScroll').innerHTML = html;
+}
+
+function copySummary() {
+  navigator.clipboard.writeText(summaryRaw)
+    .then(() => toast('Copied'))
+    .catch(() => {
+      // iOS fallback
+      const el = document.createElement('textarea');
+      el.value = summaryRaw;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      toast('Copied');
+    });
+}
+
+// ── UI helpers ─────────────────────────────────────────────
+function setStatus(cls, text) {
+  document.getElementById('dot').className = 'dot ' + cls;
+  document.getElementById('statusText').textContent = text;
+}
+
+function startTimer() {
+  timerInt = setInterval(() => {
+    elapsed = Math.floor((Date.now() - startTs) / 1000);
+    document.getElementById('timer').textContent = formatElapsed(elapsed);
+  }, 500);
+}
+function stopTimer() { clearInterval(timerInt); }
+
+function formatElapsed(s) {
+  return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+
+function startWave() {
+  const bars = document.querySelectorAll('.wb');
+  waveInt = setInterval(() => {
+    bars.forEach(b => b.style.height = (2 + Math.random() * 14) + 'px');
+  }, 120);
+}
+function stopWave() {
+  clearInterval(waveInt);
+  document.querySelectorAll('.wb').forEach(b => b.style.height = '3px');
+}
+
+function toast(msg, ms=2200) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), ms);
+}
+</script>
+</body>
+</html>
