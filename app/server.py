@@ -28,17 +28,20 @@ PORT            = 8765
 USE_FP16        = torch.cuda.is_available()
 
 # ── State ─────────────────────────────────────────────────────────────────────
-recording           = False
-loopback_chunks     = []
-mic_chunks          = []
-stop_event          = threading.Event()
-rec_thread_loopback = None
-rec_thread_mic      = None
-whisper_model       = None
-current_status      = "idle"
-last_summary        = ""
-last_transcript     = ""
-last_saved_path     = ""
+recording             = False
+loopback_chunks       = []
+mic_chunks            = []
+stop_event            = threading.Event()
+rec_thread_loopback   = None
+rec_thread_mic        = None
+whisper_model         = None
+current_status        = "idle"
+last_summary          = ""
+last_transcript       = ""
+last_saved_path       = ""
+transcription_ready   = threading.Event()
+loopback_rate_saved   = 48000
+mic_rate_saved        = 48000
 
 # ── Device detection ──────────────────────────────────────────────────────────
 def get_loopback_device():
@@ -227,15 +230,16 @@ def mix_audio(chunks_a, rate_a, chunks_b, rate_b, target_rate):
     return mixed
 
 
-# ── Process after stop ────────────────────────────────────────────────────────
-def process_recording(role, fmt, loopback_rate, mic_rate):
-    global current_status, last_summary, last_transcript, last_saved_path, whisper_model
+# ── Step 1: Stop recording → mix + transcribe (runs immediately on /stop) ──────
+def transcribe_recording(loopback_rate, mic_rate):
+    global current_status, last_transcript, whisper_model
 
-    current_status = "processing"
+    current_status = "transcribing"
 
     if not loopback_chunks and not mic_chunks:
         print("No audio captured.")
         current_status = "error"
+        transcription_ready.set()
         return
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
@@ -247,17 +251,17 @@ def process_recording(role, fmt, loopback_rate, mic_rate):
     # Save as MP3 128kbps
     audio_path = OUTPUT_DIR / f"audio_{timestamp}.mp3"
     audio_int16 = (mixed * 32767).astype(np.int16)
-    segment = AudioSegment(
+    seg = AudioSegment(
         audio_int16.tobytes(),
         frame_rate=SAMPLE_RATE,
         sample_width=2,
         channels=1
     )
-    segment.export(str(audio_path), format="mp3", bitrate="128k")
+    seg.export(str(audio_path), format="mp3", bitrate="128k")
     size_mb = audio_path.stat().st_size / (1024 * 1024)
     print(f"Audio saved: {audio_path} ({duration:.1f}s, {size_mb:.1f}MB)")
 
-    # Transcribe
+    # Transcribe with Whisper
     gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
     print(f"Loading Whisper {WHISPER_MODEL} (fp16={USE_FP16}, device={gpu_name})...")
     if whisper_model is None:
@@ -270,14 +274,30 @@ def process_recording(role, fmt, loopback_rate, mic_rate):
         fp16=USE_FP16
     )
     last_transcript = result["text"].strip()
-    print(f"Transcript: {len(last_transcript.split())} words")
+    print(f"Transcript ready: {len(last_transcript.split())} words")
 
     if not last_transcript:
         print("Empty transcript — no speech detected.")
         current_status = "error"
+
+    # Signal that transcription is done — /format can now proceed
+    transcription_ready.set()
+
+
+# ── Step 2: Format with Claude (runs after /format is called) ─────────────────
+def format_with_claude(role, fmt):
+    global current_status, last_summary, last_saved_path
+
+    # Wait for Whisper to finish (may already be done if user was slow picking format)
+    print("Waiting for transcription to complete...")
+    transcription_ready.wait()
+
+    if current_status == "error" or not last_transcript:
+        current_status = "error"
         return
 
-    # Claude
+    current_status = "processing"
+
     format_instructions = {
         "brief":    "Create a concise debrief: key topics, key decisions, and action items.",
         "detailed": "Create a detailed breakdown: Meeting Overview, Key Discussion Points, Their Asks, My Commitments, Open Questions, Next Steps.",
@@ -299,7 +319,7 @@ practically. Use ### for section headings, bullet points with - for lists.""",
                 "role": "user",
                 "content": f"""My role in this meeting: {role}
 
-Format requested: {format_instructions.get(fmt, format_instructions['brief'])}
+Format requested: {format_instructions.get(fmt, fmt)}
 
 Raw transcript:
 {last_transcript}"""
@@ -311,6 +331,7 @@ Raw transcript:
         last_summary = "### Claude Unavailable\n\nTranscript captured but formatting failed. Check your API credits.\n\nError: " + str(e)
 
     # Save markdown
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     out_path = OUTPUT_DIR / f"meeting_{timestamp}.md"
     md_content = f"""# Meeting — {datetime.now().strftime("%d %B %Y, %H:%M")}
 **Role:** {role}
@@ -396,6 +417,7 @@ class Handler(BaseHTTPRequestHandler):
         global recording, stop_event, rec_thread_loopback, rec_thread_mic
         global current_status, loopback_chunks, mic_chunks
         global last_summary, last_transcript, last_saved_path
+        global loopback_rate_saved, mic_rate_saved, transcription_ready
 
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length", 0))
@@ -417,12 +439,17 @@ class Handler(BaseHTTPRequestHandler):
             loopback_rate = get_device_sample_rate(loopback_id) if loopback_id is not None else SAMPLE_RATE
             mic_rate = get_device_sample_rate(mic_id) if mic_id is not None else SAMPLE_RATE
 
+            # Save rates for use by /stop later
+            loopback_rate_saved = loopback_rate
+            mic_rate_saved      = mic_rate
+
             # Reset state
             loopback_chunks.clear()
             mic_chunks.clear()
             last_summary = ""
             last_transcript = ""
             last_saved_path = ""
+            transcription_ready.clear()
             stop_event.clear()
             recording = True
             current_status = "recording"
@@ -468,21 +495,29 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True, "status": "recording"})
 
         elif path == "/stop":
-            role = body.get("role", "Meeting participant")
-            fmt = body.get("format", "brief")
+            # Stop recording immediately and kick off Whisper in background.
+            # Format choice comes later via /format.
             recording = False
             stop_event.set()
-            current_status = "processing"
-
-            # Get the rates used
-            loopback_id, _ = get_loopback_device()
-            mic_id, _ = get_mic_device()
-            loopback_rate = get_device_sample_rate(loopback_id) if loopback_id is not None else SAMPLE_RATE
-            mic_rate = get_device_sample_rate(mic_id) if mic_id is not None else SAMPLE_RATE
+            transcription_ready.clear()
+            current_status = "transcribing"
 
             t = threading.Thread(
-                target=process_recording,
-                args=(role, fmt, loopback_rate, mic_rate),
+                target=transcribe_recording,
+                args=(loopback_rate_saved, mic_rate_saved),
+                daemon=True
+            )
+            t.start()
+            self.send_json({"ok": True, "status": "transcribing"})
+
+        elif path == "/format":
+            # Receive format choice. If Whisper is still running this will wait internally.
+            role = body.get("role", "Meeting participant")
+            fmt  = body.get("format", "brief")
+
+            t = threading.Thread(
+                target=format_with_claude,
+                args=(role, fmt),
                 daemon=True
             )
             t.start()

@@ -999,8 +999,16 @@ function initRecognition() {
 
 // ── Controls ──────────────────────────────────────────────
 function handleMainBtn() {
-  if (mainBtnState === 'start') startRecording();
-  else promptFormat();
+  if (mainBtnState === 'start')  startRecording();
+  else if (mainBtnState === 'stop')   promptFormat();
+  else if (mainBtnState === 'format') reopenFormatSheet();
+}
+
+function reopenFormatSheet() {
+  awaitingFormat = true;
+  document.getElementById('fmodalBackdrop').classList.add('visible');
+  document.getElementById('fmodalSheet').classList.add('visible');
+  document.getElementById('fmodalSubmit').focus();
 }
 
 function startRecording() {
@@ -1037,10 +1045,18 @@ function startRecording() {
 }
 
 function promptFormat() {
-  if (!isListening) return;
+  if (!isListening && !isPaused) return;
+
+  // 1. Stop recording immediately
+  isListening    = false;
+  isPaused       = false;
+  awaitingFormat = true;
+  try { recognition.stop(); } catch(e) {}
   stopTimer();
   stopWave();
-  awaitingFormat = true;
+  setStatus('', 'STOPPED');
+
+  // 2. Open format sheet — user picks while transcript is already in memory
   document.getElementById('fmodalBackdrop').classList.add('visible');
   document.getElementById('fmodalSheet').classList.add('visible');
   document.getElementById('fmodalSubmit').focus();
@@ -1049,12 +1065,26 @@ function promptFormat() {
 function cancelFormat() {
   document.getElementById('fmodalBackdrop').classList.remove('visible');
   document.getElementById('fmodalSheet').classList.remove('visible');
+  awaitingFormat = false;
 
-  if (isListening && !isPaused) {
-    awaitingFormat = false;
-    startTs = Date.now() - elapsed * 1000;
-    startTimer();
-    startWave();
+  // Recording is already stopped — give them a way to come back to format
+  if (segments.length > 0) {
+    mainBtnState = 'format';
+    const mb = document.getElementById('mainBtn');
+    mb.textContent = 'FORMAT RESULTS';
+    mb.className   = 'big-btn stop';
+    mb.disabled    = false;
+    document.getElementById('pauseBtn').disabled = true;
+    setStatus('', 'READY');
+  } else {
+    // Nothing recorded — reset fully
+    mainBtnState = 'start';
+    const mb = document.getElementById('mainBtn');
+    mb.textContent = 'START';
+    mb.className   = 'big-btn start';
+    mb.disabled    = false;
+    document.getElementById('pauseBtn').disabled = true;
+    setStatus('', 'READY');
   }
 }
 
@@ -1067,13 +1097,10 @@ function confirmFormat() {
 }
 
 async function doStop(formats) {
+  // Recognition, timer, and wave are already stopped from promptFormat()
   isListening    = false;
   isPaused       = false;
   awaitingFormat = false;
-  try { recognition.stop(); } catch(e) {}
-
-  stopTimer();
-  stopWave();
 
   document.getElementById('interim').textContent = '';
   document.getElementById('pauseBtn').disabled = true;

@@ -567,6 +567,7 @@ header {
 <div id="formatModal" class="fmodal" role="dialog" aria-modal="true" aria-label="Choose output format">
   <div class="fmodal-card">
     <div class="fmodal-heading">Format output</div>
+    <div id="fmodalNote" style="font-family:'Barlow',sans-serif;font-size:10px;letter-spacing:1px;color:var(--muted2);margin-bottom:10px;margin-top:-8px">Whisper is transcribing in the background&hellip;</div>
     <div class="fmodal-opts" role="group" aria-label="Output formats">
       <label class="fopt selected">
         <input type="checkbox" value="brief" checked>
@@ -706,26 +707,55 @@ async function togglePause() {
 }
 
 // ── Format modal ───────────────────────────────
-function promptFormat() {
+async function promptFormat() {
   if (!serverOk) { toast('Server not running'); return; }
-  stopTimer(); stopWave(); // immediate visual feedback
+
+  // 1. Stop recording immediately
+  stopTimer(); stopWave();
+  setButtons(true, true, true);
+  try {
+    await fetch(`${API}/stop`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+    });
+  } catch(e) { toast('Server error'); return; }
+  state = 'transcribing';
+  setStatus('processing', 'TRANSCRIBING');
+
+  // 2. Open format modal — user picks while Whisper runs
+  document.getElementById('fmodalNote').style.display = '';
   document.getElementById('formatModal').classList.add('visible');
   document.getElementById('fmodalSubmit').focus();
 }
 
 function cancelFormat() {
   document.getElementById('formatModal').classList.remove('visible');
-  if (state === 'recording') { startTimer(); startWave(); }
+  // Recording is already stopped — show a re-open button in the summary panel
+  if (state === 'transcribing' || state === 'processing') {
+    document.getElementById('summaryScroll').innerHTML = `
+      <div class="summary-placeholder">
+        <p>Transcribing…<br><br>
+          <button class="copy-btn" style="margin-top:16px" onclick="reopenFormatModal()">
+            Pick Format
+          </button>
+        </p>
+      </div>`;
+  }
+}
+
+function reopenFormatModal() {
+  document.getElementById('fmodalNote').textContent = 'Pick your formats then hit Summarise.';
+  document.getElementById('formatModal').classList.add('visible');
+  document.getElementById('fmodalSubmit').focus();
 }
 
 function confirmFormat() {
   const selected = [...document.querySelectorAll('.fopt input:checked')].map(c => c.value);
   if (selected.length === 0) { toast('Pick at least one'); return; }
   document.getElementById('formatModal').classList.remove('visible');
-  doStop(selected);
+  doFormat(selected);
 }
 
-async function doStop(formats) {
+async function doFormat(formats) {
   const formatInstructions = {
     brief:    'a concise debrief: key topics, key decisions, and action items',
     detailed: 'a detailed breakdown: Meeting Overview, Key Discussion Points, Their Asks, My Commitments, Open Questions, Next Steps',
@@ -737,21 +767,21 @@ async function doStop(formats) {
     ? formats[0]
     : `Provide ALL of the following sections:\n${formats.map(f => `- ${formatInstructions[f]}`).join('\n')}`;
 
+  state = 'processing';
+  setStatus('processing', 'PROCESSING');
+  document.getElementById('summaryScroll').innerHTML = `
+    <div class="processing-state">
+      <div class="spin"></div>
+      <p id="processingMsg">Waiting for transcript…</p>
+    </div>`;
+  document.getElementById('summaryStatus').textContent =
+    formats.map(f => f.toUpperCase()).join(' + ');
+
   try {
-    await fetch(`${API}/stop`, {
-      method: 'POST', headers: {'Content-Type':'application/json'},
+    await fetch(`${API}/format`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ format: fmt })
     });
-    state = 'processing';
-    setStatus('processing', 'PROCESSING');
-    setButtons(true, true, true);
-    document.getElementById('summaryScroll').innerHTML = `
-      <div class="processing-state">
-        <div class="spin"></div>
-        <p>Whisper transcribing...</p>
-      </div>`;
-    document.getElementById('summaryStatus').textContent =
-      formats.map(f => f.toUpperCase()).join(' + ');
     pollForResult();
   } catch(e) { toast('Server error'); }
 }
@@ -798,6 +828,12 @@ async function pollForResult() {
         <p style="color:var(--red);padding:16px;font-size:13px;font-weight:300">
           Processing error — check server console.</p>`;
     } else {
+      // Update the in-progress message to reflect which phase we're in
+      const msgEl = document.getElementById('processingMsg');
+      if (msgEl) {
+        if (data.status === 'transcribing') msgEl.textContent = 'Whisper transcribing…';
+        else if (data.status === 'processing') msgEl.textContent = 'Claude formatting…';
+      }
       setTimeout(pollForResult, 1500);
     }
   } catch(e) { setTimeout(pollForResult, 2000); }
