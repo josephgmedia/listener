@@ -21,7 +21,7 @@
   font-weight: 800; font-style: normal;
 }
 
-/* ── BRAND TOKENS ───────────────────────────────────────────── */
+/* ── BRAND TOKENS ── */
 :root {
   --bg:        #080808;
   --surface:   #111111;
@@ -36,17 +36,16 @@
   --muted2:    #888888;
   --red:       #ff3b3b;
   --orange:    #ff8800;
+  --green:     #00ff88;
   --safe-top:    env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* ── RESET ──────────────────────────────────────────────────── */
 *, *::before, *::after {
   box-sizing: border-box; margin: 0; padding: 0;
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── GRAIN ──────────────────────────────────────────────────── */
 body::before {
   content: '';
   position: fixed; inset: 0; z-index: 900; pointer-events: none;
@@ -68,15 +67,9 @@ body {
   width: 100%;
 }
 
-/* ── FOCUS ──────────────────────────────────────────────────── */
-*:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-a:focus:not(:focus-visible),
-button:focus:not(:focus-visible) { outline: none; }
+*:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a:focus:not(:focus-visible), button:focus:not(:focus-visible) { outline: none; }
 
-/* ── SHELL ───────────────────────────────────────────────────── */
 .shell {
   display: flex;
   flex-direction: column;
@@ -85,7 +78,7 @@ button:focus:not(:focus-visible) { outline: none; }
   padding-bottom: var(--safe-bottom);
 }
 
-/* ── HEADER ──────────────────────────────────────────────────── */
+/* ── HEADER ── */
 header {
   display: flex;
   align-items: center;
@@ -105,11 +98,7 @@ header {
 }
 .logo span { color: var(--accent); }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+.header-right { display: flex; align-items: center; gap: 12px; }
 
 .status-row {
   display: flex;
@@ -122,7 +111,6 @@ header {
   color: var(--muted2);
 }
 
-/* Status dot */
 .dot {
   width: 7px; height: 7px;
   border-radius: 50%;
@@ -134,6 +122,7 @@ header {
 .dot.paused     { background: var(--orange); }
 .dot.done       { background: var(--highlight); }
 .dot.processing { background: var(--accent); animation: blink 0.6s ease-in-out infinite; }
+.dot.saving     { background: var(--orange); animation: blink 0.5s ease-in-out infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.15} }
 
 .timer {
@@ -144,7 +133,7 @@ header {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── TABS ─────────────────────────────────────────────────────── */
+/* ── TABS ── */
 .tabs {
   display: flex;
   border-bottom: 1px solid var(--border);
@@ -165,7 +154,6 @@ header {
   border-bottom: 2px solid transparent;
   transition: color 0.15s ease, border-color 0.15s ease;
   user-select: none;
-  /* Min 44px touch target */
   min-height: 44px;
   display: flex;
   align-items: center;
@@ -173,11 +161,10 @@ header {
 }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
-/* ── PANELS ───────────────────────────────────────────────────── */
 .panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
 .panel.active { display: flex; }
 
-/* ── SETUP PANEL ──────────────────────────────────────────────── */
+/* ── SETUP ── */
 .setup-scroll {
   flex: 1;
   overflow-y: auto;
@@ -198,7 +185,7 @@ header {
   margin-bottom: 10px;
 }
 
-input[type="password"] {
+input[type="password"], input[type="text"] {
   width: 100%;
   background: var(--surface2);
   border: 1px solid var(--border2);
@@ -216,7 +203,25 @@ input[type="password"] {
 input:focus { border-color: var(--accent); }
 input::placeholder { color: var(--muted); }
 
-/* How it works hint text */
+textarea {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  color: var(--text);
+  font-family: 'Barlow', sans-serif;
+  font-weight: 300;
+  font-size: 14px;
+  padding: 12px 14px;
+  outline: none;
+  line-height: 1.5;
+  -webkit-appearance: none;
+  transition: border-color 0.2s ease;
+  resize: none;
+}
+textarea:focus { border-color: var(--accent); }
+textarea::placeholder { color: var(--muted); }
+
 .hint-text {
   font-family: 'Barlow', sans-serif;
   font-weight: 300;
@@ -225,13 +230,8 @@ input::placeholder { color: var(--muted); }
   line-height: 1.9;
 }
 
-/* ── RECORD PANEL ─────────────────────────────────────────────── */
-.record-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+/* ── RECORD ── */
+.record-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .transcript-scroll {
   flex: 1;
@@ -261,14 +261,8 @@ input::placeholder { color: var(--muted); }
   text-transform: uppercase;
 }
 
-.segment {
-  margin-bottom: 14px;
-  animation: fadeUp 0.2s ease-out;
-}
-@keyframes fadeUp {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
+.segment { margin-bottom: 14px; animation: fadeUp 0.2s ease-out; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
 .seg-time {
   font-family: 'Barlow', sans-serif;
@@ -277,11 +271,7 @@ input::placeholder { color: var(--muted); }
   letter-spacing: 1px;
   margin-bottom: 4px;
 }
-.seg-text {
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--text);
-}
+.seg-text { font-size: 14px; line-height: 1.7; color: var(--text); }
 
 .interim-bar {
   padding: 10px 20px;
@@ -293,7 +283,6 @@ input::placeholder { color: var(--muted); }
   flex-shrink: 0;
 }
 
-/* ── RECORD CONTROLS ─────────────────────────────────────────── */
 .record-controls {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
@@ -329,19 +318,12 @@ input::placeholder { color: var(--muted); }
   color: var(--text);
   box-shadow: 0 0 0 0 rgba(57,49,223,0);
 }
-.big-btn.start:not(:disabled):hover {
-  box-shadow: 0 0 24px rgba(57,49,223,0.4);
-}
-.big-btn.stop    { background: var(--red);    color: #fff; }
-.big-btn.pause   { background: var(--surface2); color: var(--orange); border: 1px solid var(--border2); }
-.big-btn:active:not(:disabled)  { transform: scale(0.97); }
+.big-btn.start:not(:disabled):hover { box-shadow: 0 0 24px rgba(57,49,223,0.4); }
+.big-btn.stop  { background: var(--red);    color: #fff; }
+.big-btn:active:not(:disabled) { transform: scale(0.97); }
 .big-btn:disabled { opacity: 0.28; cursor: not-allowed; }
 
-.small-btns {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
+.small-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
 .small-btn {
   padding: 13px;
@@ -362,19 +344,11 @@ input::placeholder { color: var(--muted); }
   justify-content: center;
 }
 .small-btn:active { transform: scale(0.97); }
-.small-btn.danger {
-  border-color: transparent;
-  color: var(--muted);
-}
+.small-btn.danger { border-color: transparent; color: var(--muted); }
 .small-btn.danger:active { color: var(--red); border-color: var(--red); }
 
-/* ── SUMMARY PANEL ────────────────────────────────────────────── */
-.summary-panel {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+/* ── SUMMARY PANEL ── */
+.summary-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
 .summary-scroll {
   flex: 1;
@@ -401,6 +375,43 @@ input::placeholder { color: var(--muted); }
   line-height: 2.4;
 }
 
+/* Output blocks */
+.output-block {
+  margin-bottom: 24px;
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.output-block-header {
+  padding: 10px 14px;
+  background: var(--surface2);
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--highlight);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.output-block-copy {
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--muted2);
+  cursor: pointer;
+  padding: 4px 8px;
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  background: transparent;
+  transition: border-color 0.15s, color 0.15s;
+}
+.output-block-copy:active { color: var(--highlight); border-color: var(--accent); }
+
+.output-block-body { padding: 16px; }
+
 .summary-body h3 {
   font-family: 'Monument', sans-serif;
   font-size: 16px;
@@ -420,27 +431,15 @@ input::placeholder { color: var(--muted); }
   opacity: 0.85;
 }
 .summary-body li:last-child { border-bottom: none; }
-.summary-body li::before {
-  content: '›';
-  position: absolute;
-  left: 0;
-  color: var(--accent);
-}
-.summary-body p {
-  font-size: 14px;
-  color: var(--text);
-  opacity: 0.75;
-  line-height: 1.75;
-  margin-bottom: 8px;
-}
+.summary-body li::before { content: '›'; position: absolute; left: 0; color: var(--accent); }
+.summary-body p { font-size: 14px; color: var(--text); opacity: 0.75; line-height: 1.75; margin-bottom: 8px; }
 
-/* Processing */
 .processing-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  padding: 60px 20px;
   gap: 18px;
   color: var(--muted2);
 }
@@ -459,7 +458,90 @@ input::placeholder { color: var(--muted); }
   text-transform: uppercase;
 }
 
-/* Summary footer */
+/* Todoist confirm */
+.todoist-confirm {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 2px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: none;
+}
+.todoist-confirm.visible { display: block; }
+
+.todoist-confirm-msg {
+  font-family: 'Barlow', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.7;
+  margin-bottom: 14px;
+  opacity: 0.85;
+}
+
+.project-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.proj-btn {
+  padding: 11px 6px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-family: 'Barlow', sans-serif;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  min-height: 44px;
+}
+.proj-btn.selected { border-color: var(--accent); color: var(--highlight); background: rgba(57,49,223,0.08); }
+
+.confirm-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+.confirm-btn {
+  padding: 13px;
+  border-radius: 2px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+  border: none;
+  min-height: 44px;
+}
+.confirm-btn.yes { background: var(--accent); color: var(--text); }
+.confirm-btn.no  { background: var(--surface2); border: 1px solid var(--border2); color: var(--muted2); }
+
+/* Notion save */
+.notion-save-btn {
+  width: 100%;
+  padding: 14px;
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-family: 'Barlow', sans-serif;
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.1s cubic-bezier(0.32,0.72,0,1);
+  margin-bottom: 16px;
+  min-height: 48px;
+  display: none;
+}
+.notion-save-btn.visible { display: block; }
+.notion-save-btn:active { border-color: var(--accent); color: var(--highlight); transform: scale(0.98); }
+.notion-save-btn:disabled { opacity: 0.4; }
+
 .summary-footer {
   padding: 14px 20px;
   border-top: 1px solid var(--border);
@@ -486,23 +568,11 @@ input::placeholder { color: var(--muted); }
 }
 .copy-btn:active { border-color: var(--accent); color: var(--highlight); transform: scale(0.98); }
 
-/* ── WAVEFORM ─────────────────────────────────────────────────── */
-.waveform {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 20px;
-}
-.wb {
-  width: 2px;
-  background: var(--highlight);
-  border-radius: 1px;
-  height: 3px;
-  transition: height 0.08s ease-out;
-  opacity: 0.6;
-}
+/* ── WAVEFORM ── */
+.waveform { display: flex; align-items: center; gap: 2px; height: 20px; }
+.wb { width: 2px; background: var(--highlight); border-radius: 1px; height: 3px; transition: height 0.08s ease-out; opacity: 0.6; }
 
-/* ── TOAST ────────────────────────────────────────────────────── */
+/* ── TOAST ── */
 .toast {
   position: fixed;
   bottom: calc(20px + var(--safe-bottom));
@@ -523,7 +593,7 @@ input::placeholder { color: var(--muted); }
 }
 .toast.show { transform: translateX(-50%) translateY(0); }
 
-/* ── FORMAT MODAL (bottom sheet) ──────────────────────────────── */
+/* ── FORMAT MODAL (bottom sheet) ── */
 .fmodal-backdrop {
   position: fixed;
   inset: 0;
@@ -535,15 +605,11 @@ input::placeholder { color: var(--muted); }
   pointer-events: none;
   transition: opacity 0.25s cubic-bezier(0.32,0.72,0,1);
 }
-.fmodal-backdrop.visible {
-  opacity: 1;
-  pointer-events: all;
-}
+.fmodal-backdrop.visible { opacity: 1; pointer-events: all; }
 
 .fmodal-sheet {
   position: fixed;
-  left: 0; right: 0;
-  bottom: 0;
+  left: 0; right: 0; bottom: 0;
   z-index: 1001;
   background: var(--surface);
   border-top: 1px solid var(--border2);
@@ -552,9 +618,7 @@ input::placeholder { color: var(--muted); }
   transform: translateY(100%);
   transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
 }
-.fmodal-sheet.visible {
-  transform: translateY(0);
-}
+.fmodal-sheet.visible { transform: translateY(0); }
 
 .fmodal-handle {
   width: 36px; height: 4px;
@@ -591,16 +655,9 @@ input::placeholder { color: var(--muted); }
   user-select: none;
   min-height: 52px;
 }
-.fopt input[type="checkbox"] {
-  position: absolute;
-  opacity: 0;
-  width: 0; height: 0;
-}
+.fopt input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
 .fopt:active { transform: scale(0.98); }
-.fopt.selected {
-  border-color: var(--accent);
-  background: rgba(57,49,223,0.08);
-}
+.fopt.selected { border-color: var(--accent); background: rgba(57,49,223,0.08); }
 .fopt.selected .fopt-name { color: var(--highlight); }
 
 .fopt-name {
@@ -692,7 +749,7 @@ input::placeholder { color: var(--muted); }
       <div class="field">
         <div class="field-label">Claude API Key</div>
         <input type="password" id="apiKey" placeholder="sk-ant-..."
-          oninput="saveKey(this.value)"
+          oninput="saveKey('claude', this.value)"
           aria-label="Claude API key">
         <div style="font-family:'Barlow',sans-serif;font-size:10px;color:var(--muted);margin-top:8px;letter-spacing:1px">
           Stored locally on this device only
@@ -700,12 +757,41 @@ input::placeholder { color: var(--muted); }
       </div>
 
       <div class="field">
+        <div class="field-label">Notion Token</div>
+        <input type="password" id="notionToken" placeholder="ntn_..."
+          oninput="saveKey('notion', this.value)"
+          aria-label="Notion integration token">
+        <div style="font-family:'Barlow',sans-serif;font-size:10px;color:var(--muted);margin-top:8px;letter-spacing:1px">
+          Stored locally on this device only
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Todoist Token</div>
+        <input type="password" id="todoistToken" placeholder="paste token..."
+          oninput="saveKey('todoist', this.value)"
+          aria-label="Todoist API token">
+        <div style="font-family:'Barlow',sans-serif;font-size:10px;color:var(--muted);margin-top:8px;letter-spacing:1px">
+          Stored locally on this device only
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Context (optional)</div>
+        <input type="text" id="contextInput" placeholder="Who was this with? What was it about?"
+          aria-label="Meeting context">
+      </div>
+
+      <div class="field">
         <div class="field-label">How it works</div>
         <div class="hint-text">
-          Uses your device mic to capture the room.<br>
-          Tap Record → Start → speak → Stop.<br>
-          Pick your output format, then Claude<br>
-          formats your notes automatically.
+          1. Record → Start → speak → Stop<br>
+          2. Pick formats in the bottom sheet<br>
+          3. Transcript auto-saves to Notion<br>
+          4. Claude generates your outputs<br>
+          5. Action items push to Todoist<br>
+          6. Outputs save back to Notion<br><br>
+          <span style="color:var(--muted)">No bots. Nothing joins your call.</span>
         </div>
       </div>
 
@@ -745,7 +831,22 @@ input::placeholder { color: var(--muted); }
         </div>
       </div>
       <div class="summary-footer" id="summaryFooter">
-        <button class="copy-btn" onclick="copySummary()">Copy Summary</button>
+        <button class="notion-save-btn" id="notionSaveBtn" onclick="saveOutputToNotion()">Save to Notion</button>
+
+        <div id="todoistConfirm" class="todoist-confirm">
+          <div class="todoist-confirm-msg" id="todoistMsg"></div>
+          <div class="project-btns">
+            <button class="proj-btn" data-proj="tec"       onclick="selectProject(this)">TEC</button>
+            <button class="proj-btn" data-proj="freelance" onclick="selectProject(this)">Freelance</button>
+            <button class="proj-btn" data-proj="personal"  onclick="selectProject(this)">Personal</button>
+          </div>
+          <div class="confirm-btns">
+            <button class="confirm-btn yes" onclick="pushToTodoist()">Push to Todoist</button>
+            <button class="confirm-btn no"  onclick="skipTodoist()">Skip</button>
+          </div>
+        </div>
+
+        <button class="copy-btn" onclick="copyAll()">Copy All</button>
       </div>
     </div>
   </div>
@@ -772,8 +873,8 @@ input::placeholder { color: var(--muted); }
     </label>
     <label class="fopt">
       <input type="checkbox" value="actions">
-      <span class="fopt-name">Actions Only</span>
-      <span class="fopt-desc">Commitments and next steps — mine and theirs</span>
+      <span class="fopt-name">Action Items</span>
+      <span class="fopt-desc">My tasks and their commitments — labelled clearly</span>
     </label>
     <label class="fopt">
       <input type="checkbox" value="email">
@@ -788,9 +889,22 @@ input::placeholder { color: var(--muted); }
 </div>
 
 <script>
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const CLAUDE_MODEL     = 'claude-sonnet-4-6';
+const NOTION_DB_ID     = '33f4226c4c3c80058e90cc671625583d';
+const NOTION_VERSION   = '2022-06-28';
+const TODOIST_PROJECTS = {
+  tec:       '6gMXhCff3fwfvw7x',
+  freelance: '6gMXhFq662PPvHRQ',
+  personal:  '6gMXhHFfXH4XmrFR'
+};
 
-// ── State ──────────────────────────────────────────────────────
+const formatInstructions = {
+  brief:    'Create a concise debrief: key topics, key decisions, and action items.',
+  detailed: 'Create a detailed breakdown with sections: Meeting Overview, Key Discussion Points, Commitments, Open Questions, Next Steps.',
+  actions:  'Extract ONLY action items and commitments. Label each as [JOE] or [THEM]. Numbered list, clear and brief.',
+  email:    'Draft a professional follow-up email Joe can send. Subject line first. Summarise what was discussed and confirm next steps. Joe\'s tone: direct, warm, no waffle.'
+};
+
 let recognition    = null;
 let isListening    = false;
 let isPaused       = false;
@@ -801,21 +915,21 @@ let elapsed        = 0;
 let timerInt       = null;
 let waveInt        = null;
 let summaryRaw     = '';
+let outputRaw      = {};
 let mainBtnState   = 'start';
+let notionPageId   = null;
+let extractedActions = [];
+let selectedProject  = null;
 
-const formatInstructions = {
-  brief:    'Create a concise debrief: key topics, key decisions, and action items.',
-  detailed: 'Create a detailed breakdown with sections: Meeting Overview, Key Discussion Points, Commitments, Open Questions, Next Steps.',
-  actions:  'Extract ONLY action items and commitments — mine and theirs. Clear list format.',
-  email:    'Draft a professional follow-up email I can send to the other party. Summarise what was discussed and confirm next steps.'
-};
-
-// ── Boot ───────────────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────
 window.onload = () => {
-  const saved = localStorage.getItem('listener_api_key');
-  if (saved) document.getElementById('apiKey').value = saved;
+  const ck = localStorage.getItem('listener_claude_key');
+  const nk = localStorage.getItem('listener_notion_key');
+  const tk = localStorage.getItem('listener_todoist_key');
+  if (ck) document.getElementById('apiKey').value = ck;
+  if (nk) document.getElementById('notionToken').value = nk;
+  if (tk) document.getElementById('todoistToken').value = tk;
 
-  // Toggle .selected class on format option labels
   document.querySelectorAll('.fopt').forEach(label => {
     const cb = label.querySelector('input[type="checkbox"]');
     cb.addEventListener('change', () => {
@@ -823,17 +937,20 @@ window.onload = () => {
     });
   });
 
-  // Escape to close modal
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') cancelFormat();
   });
 };
 
-function saveKey(val) {
-  localStorage.setItem('listener_api_key', val);
+function saveKey(type, val) {
+  localStorage.setItem('listener_' + type + '_key', val);
 }
 
-// ── Tabs ───────────────────────────────────────────────────────
+function getKey(type) {
+  return localStorage.getItem('listener_' + type + '_key') || '';
+}
+
+// ── Tabs ──────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => {
     t.classList.remove('active');
@@ -846,7 +963,7 @@ function switchTab(name) {
   document.getElementById('panel-' + name).classList.add('active');
 }
 
-// ── Speech recognition ─────────────────────────────────────────
+// ── Speech recognition ────────────────────────────────────
 function initRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('Speech recognition not supported'); return null; }
@@ -859,11 +976,8 @@ function initRecognition() {
   r.onresult = (e) => {
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) {
-        addSegment(e.results[i][0].transcript.trim());
-      } else {
-        interim += e.results[i][0].transcript;
-      }
+      if (e.results[i].isFinal) addSegment(e.results[i][0].transcript.trim());
+      else interim += e.results[i][0].transcript;
     }
     document.getElementById('interim').textContent = interim;
   };
@@ -875,7 +989,6 @@ function initRecognition() {
   };
 
   r.onend = () => {
-    // Don't restart if we're in the format modal or paused
     if (isListening && !isPaused && !awaitingFormat) {
       try { r.start(); } catch(ex) {}
     }
@@ -884,7 +997,7 @@ function initRecognition() {
   return r;
 }
 
-// ── Controls ───────────────────────────────────────────────────
+// ── Controls ──────────────────────────────────────────────
 function handleMainBtn() {
   if (mainBtnState === 'start') startRecording();
   else promptFormat();
@@ -893,24 +1006,28 @@ function handleMainBtn() {
 function startRecording() {
   recognition = initRecognition();
   if (!recognition) return;
-
   try { recognition.start(); } catch(e) { toast('Could not start mic'); return; }
 
-  isListening = true;
-  isPaused = false;
+  isListening    = true;
+  isPaused       = false;
   awaitingFormat = false;
-  segments = [];
-  startTs = Date.now();
-  elapsed = 0;
+  segments       = [];
+  startTs        = Date.now();
+  elapsed        = 0;
+  notionPageId   = null;
+  outputRaw      = {};
 
   document.getElementById('emptyState').style.display = 'none';
   document.getElementById('interim').textContent = '';
+  document.getElementById('summaryScroll').innerHTML = '<div class="summary-placeholder"><p>Record a meeting first.<br><br>Claude will format<br>your notes here.</p></div>';
+  document.getElementById('summaryFooter').classList.remove('visible');
+  document.getElementById('notionSaveBtn').classList.remove('visible');
+  document.getElementById('todoistConfirm').classList.remove('visible');
 
   mainBtnState = 'stop';
   const mb = document.getElementById('mainBtn');
   mb.textContent = 'STOP & SUMMARISE';
   mb.className = 'big-btn stop';
-
   document.getElementById('pauseBtn').disabled = false;
 
   setStatus('recording', 'REC');
@@ -921,12 +1038,9 @@ function startRecording() {
 
 function promptFormat() {
   if (!isListening) return;
-  // Pause timer + wave visually, but keep recognition alive briefly
   stopTimer();
   stopWave();
   awaitingFormat = true;
-
-  // Show bottom sheet
   document.getElementById('fmodalBackdrop').classList.add('visible');
   document.getElementById('fmodalSheet').classList.add('visible');
   document.getElementById('fmodalSubmit').focus();
@@ -938,7 +1052,6 @@ function cancelFormat() {
 
   if (isListening && !isPaused) {
     awaitingFormat = false;
-    // Restart timer + wave if recording is still live
     startTs = Date.now() - elapsed * 1000;
     startTimer();
     startWave();
@@ -948,27 +1061,28 @@ function cancelFormat() {
 function confirmFormat() {
   const selected = [...document.querySelectorAll('.fopt input:checked')].map(c => c.value);
   if (selected.length === 0) { toast('Pick at least one format'); return; }
-
   document.getElementById('fmodalBackdrop').classList.remove('visible');
   document.getElementById('fmodalSheet').classList.remove('visible');
   doStop(selected);
 }
 
 async function doStop(formats) {
-  isListening = false;
-  isPaused = false;
+  isListening    = false;
+  isPaused       = false;
   awaitingFormat = false;
   try { recognition.stop(); } catch(e) {}
 
+  stopTimer();
+  stopWave();
+
   document.getElementById('interim').textContent = '';
   document.getElementById('pauseBtn').disabled = true;
+
   mainBtnState = 'start';
   const mb = document.getElementById('mainBtn');
   mb.textContent = 'START';
   mb.className = 'big-btn start';
   mb.disabled = true;
-
-  setStatus('processing', 'PROCESSING');
 
   if (segments.length === 0) {
     toast('Nothing recorded');
@@ -977,48 +1091,49 @@ async function doStop(formats) {
     return;
   }
 
+  // Save transcript to Notion first
+  setStatus('saving', 'SAVING');
+  toast('Saving to Notion...');
+  await saveTranscriptToNotion();
+
+  // Then process with Claude
+  setStatus('processing', 'PROCESSING');
   switchTab('summary');
-  document.getElementById('summaryScroll').innerHTML = `
-    <div class="processing-state">
-      <div class="spin"></div>
-      <p>Claude formatting...</p>
-    </div>`;
+  document.getElementById('summaryScroll').innerHTML = '<div class="processing-state"><div class="spin"></div><p>Claude formatting...</p></div>';
   document.getElementById('summaryFooter').classList.remove('visible');
 
-  const key = document.getElementById('apiKey').value.trim();
-  if (!key) {
-    document.getElementById('summaryScroll').innerHTML = `
-      <div class="summary-placeholder">
-        <p>Add your Claude API key<br>in the Setup tab first.</p>
-      </div>`;
+  const claudeKey = getKey('claude');
+  if (!claudeKey) {
+    document.getElementById('summaryScroll').innerHTML = '<div class="summary-placeholder"><p>Add your Claude API key<br>in the Setup tab first.</p></div>';
     mb.disabled = false;
     setStatus('', 'READY');
     toast('No API key — check Setup tab');
     return;
   }
 
-  const transcript = segments.map(s => `[${s.time}] ${s.text}`).join('\n');
+  const context    = document.getElementById('contextInput').value.trim();
+  const transcript = segments.map(s => '[' + s.time + '] ' + s.text).join('\n');
 
   const fmt = formats.length === 1
     ? formatInstructions[formats[0]]
-    : `Provide ALL of the following sections:\n${formats.map(f => `- ${formatInstructions[f]}`).join('\n')}`;
+    : 'Provide ALL of the following sections, each starting with === SECTION NAME ===:\n' + formats.map(f => '- ' + f.toUpperCase() + ': ' + formatInstructions[f]).join('\n');
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': key,
+        'x-api-key': claudeKey,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
         model: CLAUDE_MODEL,
         max_tokens: 2000,
-        system: `You are a meeting assistant for Joe, a freelance motion designer, videographer, photographer, and musician based in Sydney, Australia. He works across projection design, animation, content creation, and video production. Format meeting transcripts clearly and practically. Use ### for section headings, bullet points with - for lists.`,
+        system: 'You are a meeting assistant for Joe Giuffrida, a Senior Designer and Animator at The Electric Canvas in Sydney. He also does freelance motion design, web, and creative work. Format outputs clearly and practically. Use ### for section headings, bullet points with - for lists.',
         messages: [{
           role: 'user',
-          content: `Format requested: ${fmt}\n\nRaw transcript:\n${transcript}`
+          content: (context ? 'Context: ' + context + '\n\n' : '') + 'Format requested: ' + fmt + '\n\nRaw transcript:\n' + transcript
         }]
       })
     });
@@ -1026,15 +1141,71 @@ async function doStop(formats) {
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
     summaryRaw = data.content[0].text;
-    renderSummary(summaryRaw);
+
+    // Parse multi-format output
+    outputRaw = {};
+    if (formats.length === 1) {
+      outputRaw[formats[0]] = summaryRaw;
+    } else {
+      formats.forEach(fmt => {
+        const marker = '=== ' + fmt.toUpperCase() + ' ===';
+        const idx    = summaryRaw.indexOf(marker);
+        if (idx === -1) { outputRaw[fmt] = ''; return; }
+        const start  = idx + marker.length;
+        const nextIdx = formats
+          .filter(f => f !== fmt)
+          .map(f => summaryRaw.indexOf('=== ' + f.toUpperCase() + ' ==='))
+          .filter(i => i > idx)
+          .sort((a,b) => a-b)[0];
+        outputRaw[fmt] = summaryRaw.slice(start, nextIdx || undefined).trim();
+      });
+    }
+
+    // Render output blocks
+    const fmtLabels = { brief: 'Quick Debrief', detailed: 'Full Breakdown', actions: 'Action Items', email: 'Follow-up Email' };
+    const scroll = document.getElementById('summaryScroll');
+    scroll.innerHTML = '';
+
+    formats.forEach(fmt => {
+      const block = document.createElement('div');
+      block.className = 'output-block';
+      block.innerHTML =
+        '<div class="output-block-header">' +
+          '<span>' + fmtLabels[fmt] + '</span>' +
+          '<button class="output-block-copy" onclick="copyBlock(\'' + fmt + '\')">Copy</button>' +
+        '</div>' +
+        '<div class="output-block-body">' +
+          renderMarkdown(outputRaw[fmt]) +
+        '</div>';
+      scroll.appendChild(block);
+    });
+
+    // Todoist confirm if actions selected
+    if (formats.includes('actions') && outputRaw['actions']) {
+      extractedActions = outputRaw['actions']
+        .split('\n')
+        .filter(l => /^\d+\.\s+\[JOE\]/i.test(l))
+        .map(l => l.replace(/^\d+\.\s+\[JOE\]\s*/i, '').trim())
+        .filter(Boolean);
+
+      if (extractedActions.length > 0) {
+        const preview = extractedActions.slice(0, 2).map(a => '› ' + a).join('<br>');
+        document.getElementById('todoistMsg').innerHTML =
+          'Found ' + extractedActions.length + ' action item' + (extractedActions.length !== 1 ? 's' : '') + ' for you' +
+          (context ? ' — sounds like this was about <strong>' + context + '</strong>' : '') + '.<br><br>' +
+          '<span style="font-size:12px;color:var(--muted2)">' + preview + (extractedActions.length > 2 ? '<br>...' : '') + '</span>' +
+          '<br><br>Assign to project:';
+        document.getElementById('todoistConfirm').classList.add('visible');
+      }
+    }
+
+    document.getElementById('notionSaveBtn').classList.add('visible');
     document.getElementById('summaryFooter').classList.add('visible');
     setStatus('done', 'DONE');
     toast('Summary ready');
+
   } catch(e) {
-    document.getElementById('summaryScroll').innerHTML = `
-      <div class="summary-placeholder">
-        <p style="color:#aa3333">Error: ${e.message}</p>
-      </div>`;
+    document.getElementById('summaryScroll').innerHTML = '<div class="summary-placeholder"><p style="color:var(--red)">Error: ' + e.message + '</p></div>';
     setStatus('', 'ERROR');
     toast('Claude error');
   }
@@ -1066,31 +1237,26 @@ function togglePause() {
 }
 
 function clearAll() {
-  isListening = false;
-  isPaused = false;
+  isListening    = false;
+  isPaused       = false;
   awaitingFormat = false;
-  segments = [];
-  elapsed = 0;
-  summaryRaw = '';
+  segments       = [];
+  elapsed        = 0;
+  summaryRaw     = '';
+  outputRaw      = {};
+  notionPageId   = null;
   try { if (recognition) recognition.stop(); } catch(e) {}
   stopTimer();
   stopWave();
 
-  // Close modal if open
   document.getElementById('fmodalBackdrop').classList.remove('visible');
   document.getElementById('fmodalSheet').classList.remove('visible');
-
-  document.getElementById('transcriptScroll').innerHTML = `
-    <div class="empty-state" id="emptyState">
-      <div class="empty-icon" aria-hidden="true">🎙</div>
-      <p>Tap Start to begin</p>
-    </div>`;
+  document.getElementById('transcriptScroll').innerHTML = '<div class="empty-state" id="emptyState"><div class="empty-icon" aria-hidden="true">🎙</div><p>Tap Start to begin</p></div>';
   document.getElementById('interim').textContent = '';
-  document.getElementById('summaryScroll').innerHTML = `
-    <div class="summary-placeholder">
-      <p>Record a meeting first.<br><br>Claude will format<br>your notes here.</p>
-    </div>`;
+  document.getElementById('summaryScroll').innerHTML = '<div class="summary-placeholder"><p>Record a meeting first.<br><br>Claude will format<br>your notes here.</p></div>';
   document.getElementById('summaryFooter').classList.remove('visible');
+  document.getElementById('notionSaveBtn').classList.remove('visible');
+  document.getElementById('todoistConfirm').classList.remove('visible');
   document.getElementById('timer').textContent = '00:00';
   document.getElementById('wordCount').textContent = '0 words';
   document.getElementById('segCount').textContent = '0 segments';
@@ -1105,28 +1271,188 @@ function clearAll() {
   setStatus('', 'READY');
 }
 
-// ── Transcript ─────────────────────────────────────────────────
+// ── Transcript ────────────────────────────────────────────
 function addSegment(text) {
   if (!text) return;
   const time = formatElapsed(Math.floor((Date.now() - startTs) / 1000));
   segments.push({ time, text });
 
   const area = document.getElementById('transcriptScroll');
-  const div = document.createElement('div');
+  const div  = document.createElement('div');
   div.className = 'segment';
-  div.innerHTML = `<div class="seg-time">${time}</div><div class="seg-text">${text}</div>`;
+  div.innerHTML = '<div class="seg-time">' + time + '</div><div class="seg-text">' + text + '</div>';
   area.appendChild(div);
   area.scrollTop = area.scrollHeight;
 
   const words = segments.reduce((a, s) => a + s.text.split(' ').length, 0);
   document.getElementById('wordCount').textContent = words + ' words';
-  document.getElementById('segCount').textContent = segments.length + ' segments';
+  document.getElementById('segCount').textContent  = segments.length + ' segments';
 }
 
-// ── Summary ────────────────────────────────────────────────────
-function renderSummary(text) {
+// ── Notion — save transcript ──────────────────────────────
+async function saveTranscriptToNotion() {
+  const token = getKey('notion');
+  if (!token) { setStatus('done', 'DONE'); return; }
+
+  const context    = document.getElementById('contextInput').value.trim();
+  const now        = new Date();
+  const title      = now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+                   + (context ? ' — ' + context : '');
+  const transcript = segments.map(s => '[' + s.time + '] ' + s.text).join('\n');
+
+  try {
+    const res = await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'Notion-Version': NOTION_VERSION
+      },
+      body: JSON.stringify({
+        parent: { database_id: NOTION_DB_ID },
+        properties: {
+          Name:       { title:     [{ text: { content: title } }] },
+          Status:     { select:    { name: 'Unprocessed' } },
+          Date:       { date:      { start: now.toISOString().split('T')[0] } },
+          Context:    { rich_text: [{ text: { content: context } }] },
+          Transcript: { rich_text: [{ text: { content: transcript.substring(0, 2000) } }] }
+        }
+      })
+    });
+
+    const data = await res.json();
+    if (data.object === 'error') throw new Error(data.message);
+    notionPageId = data.id;
+    toast('Transcript saved');
+  } catch(e) {
+    toast('Notion save failed: ' + e.message);
+  }
+}
+
+// ── Notion — save output ──────────────────────────────────
+async function saveOutputToNotion() {
+  const token = getKey('notion');
+  if (!token) { toast('No Notion token — add in Setup'); return; }
+
+  const btn = document.getElementById('notionSaveBtn');
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  const outputText = Object.entries(outputRaw)
+    .map(([fmt, text]) => '=== ' + fmt.toUpperCase() + ' ===\n' + text)
+    .join('\n\n');
+
+  try {
+    if (notionPageId) {
+      await fetch('https://api.notion.com/v1/pages/' + notionPageId, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          'Notion-Version': NOTION_VERSION
+        },
+        body: JSON.stringify({
+          properties: {
+            Status: { select: { name: 'Done' } },
+            Output: { rich_text: [{ text: { content: outputText.substring(0, 2000) } }] }
+          }
+        })
+      });
+    } else {
+      const context = document.getElementById('contextInput').value.trim();
+      const now     = new Date();
+      await fetch('https://api.notion.com/v1/pages', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+          'Content-Type': 'application/json',
+          'Notion-Version': NOTION_VERSION
+        },
+        body: JSON.stringify({
+          parent: { database_id: NOTION_DB_ID },
+          properties: {
+            Name:   { title:  [{ text: { content: now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' }) + (context ? ' — ' + context : '') } }] },
+            Status: { select: { name: 'Done' } },
+            Output: { rich_text: [{ text: { content: outputText.substring(0, 2000) } }] }
+          }
+        })
+      });
+    }
+
+    btn.textContent = 'Saved to Notion ✓';
+    toast('Saved to Notion');
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Save to Notion';
+    toast('Notion error: ' + e.message);
+  }
+}
+
+// ── Todoist ───────────────────────────────────────────────
+function selectProject(el) {
+  document.querySelectorAll('.proj-btn').forEach(b => b.classList.remove('selected'));
+  el.classList.add('selected');
+  selectedProject = el.dataset.proj;
+}
+
+async function pushToTodoist() {
+  if (!selectedProject) { toast('Pick a project first'); return; }
+  const token = getKey('todoist');
+  if (!token) { toast('No Todoist token — add in Setup'); return; }
+
+  const projectId = TODOIST_PROJECTS[selectedProject];
+  let pushed = 0;
+
+  for (const action of extractedActions) {
+    try {
+      await fetch('https://api.todoist.com/api/v1/tasks', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: action, project_id: projectId })
+      });
+      pushed++;
+    } catch(e) {}
+  }
+
+  toast(pushed + ' task' + (pushed !== 1 ? 's' : '') + ' added to Todoist');
+  document.getElementById('todoistConfirm').classList.remove('visible');
+}
+
+function skipTodoist() {
+  document.getElementById('todoistConfirm').classList.remove('visible');
+}
+
+// ── Copy ──────────────────────────────────────────────────
+function copyBlock(fmt) {
+  const text = outputRaw[fmt] || '';
+  navigator.clipboard.writeText(text).then(() => toast('Copied')).catch(() => {
+    const el = document.createElement('textarea');
+    el.value = text;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast('Copied');
+  });
+}
+
+function copyAll() {
+  navigator.clipboard.writeText(summaryRaw).then(() => toast('Copied')).catch(() => {
+    const el = document.createElement('textarea');
+    el.value = summaryRaw;
+    document.body.appendChild(el);
+    el.select();
+    document.execCommand('copy');
+    document.body.removeChild(el);
+    toast('Copied');
+  });
+}
+
+// ── Markdown renderer ─────────────────────────────────────
+function renderMarkdown(text) {
+  if (!text) return '';
   const lines = text.split('\n');
-  let html = '<div class="summary-body">';
+  let html   = '<div class="summary-body">';
   let inList = false;
 
   lines.forEach(line => {
@@ -1135,39 +1461,25 @@ function renderSummary(text) {
     const nl = line.match(/^\d+\.\s+(.+)/);
     if (h) {
       if (inList) { html += '</ul>'; inList = false; }
-      html += `<h3>${h[1]}</h3>`;
+      html += '<h3>' + h[1] + '</h3>';
     } else if (li || nl) {
       const c = li ? li[1] : nl[1];
       if (!inList) { html += '<ul>'; inList = true; }
-      html += `<li>${c}</li>`;
+      html += '<li>' + c + '</li>';
     } else if (line.trim() === '') {
       if (inList) { html += '</ul>'; inList = false; }
     } else {
       if (inList) { html += '</ul>'; inList = false; }
-      html += `<p>${line}</p>`;
+      html += '<p>' + line + '</p>';
     }
   });
 
   if (inList) html += '</ul>';
   html += '</div>';
-  document.getElementById('summaryScroll').innerHTML = html;
+  return html;
 }
 
-function copySummary() {
-  navigator.clipboard.writeText(summaryRaw)
-    .then(() => toast('Copied'))
-    .catch(() => {
-      const el = document.createElement('textarea');
-      el.value = summaryRaw;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-      toast('Copied');
-    });
-}
-
-// ── UI helpers ─────────────────────────────────────────────────
+// ── UI helpers ────────────────────────────────────────────
 function setStatus(cls, text) {
   document.getElementById('dot').className = 'dot ' + cls;
   document.getElementById('statusText').textContent = text;
