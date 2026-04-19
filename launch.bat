@@ -3,9 +3,9 @@ cd /d "%~dp0app"
 echo.
 echo  Starting Meeting Recorder...
 
-start "Listener Server" python server.py
+start "Listener Server" cmd /k ""C:\Users\artist\AppData\Local\Programs\Python\Python313\python.exe" listener_server.py"
 
-timeout /t 2 /nobreak > nul
+timeout /t 3 /nobreak > nul
 
 start "" "http://localhost:8765"
 
