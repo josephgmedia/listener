@@ -19,7 +19,7 @@ from icalendar import Calendar
 # Create that file next to this script and paste your iCal URL as the only line.
 import pathlib
 _secret = pathlib.Path(__file__).parent / "calendar.secret"
-ICAL_URL = _secret.read_text().strip() if _secret.exists() else "PASTE_YOUR_ICAL_URL_HERE"
+ICAL_URL = _secret.read_text().strip() if _secret.exists() else "https://calendar.google.com/calendar/u/0?cid=am9lZ2l1ZmZyaWRhQHRoZWVsZWN0cmljY2FudmFzLmNvbS5hdQ"
 CHECK_INTERVAL  = 30     # seconds between calendar checks
 NOTIFY_BEFORE   = 90     # notify when meeting is within this many seconds
                          # (90s window covers a 30s polling gap so nothing slips through)

@@ -527,6 +527,8 @@ header {
       <button class="btn" id="pauseBtn" onclick="togglePause()" disabled>⏸ Pause</button>
       <button class="btn" id="stopBtn" onclick="promptFormat()" disabled>■ Stop &amp; Summarise</button>
       <button class="btn danger" id="clearBtn" onclick="clearAll()">✕ Clear</button>
+      <button class="btn" id="uploadBtn" onclick="document.getElementById('wavUploadInput').click()">⬆ Upload WAV</button>
+      <input type="file" id="wavUploadInput" accept=".wav" style="display:none" onchange="uploadWav(this)">
     </div>
   </div>
 
@@ -809,11 +811,53 @@ function clearAll() {
   document.getElementById('pauseBtn').textContent = '⏸ Pause';
 }
 
+// ── Upload existing WAV ────────────────────────
+async function uploadWav(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = ''; // reset so same file can be picked again
+
+  if (state === 'recording') { toast('Stop recording first'); return; }
+
+  clearAll();
+  setStatus('uploading', 'UPLOADING…');
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('uploadBtn').disabled = true;
+
+  const form = new FormData();
+  form.append('file', file, file.name);
+
+  try {
+    const res = await fetch(`${API}/upload`, { method: 'POST', body: form });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Upload failed');
+    state = 'transcribing';
+    setStatus('transcribing', 'TRANSCRIBING…');
+    toast('Uploaded — transcribing now…');
+    pollForResult();
+  } catch (e) {
+    setStatus('', 'IDLE');
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('uploadBtn').disabled = false;
+    toast('Upload failed: ' + e.message);
+  }
+}
+
 // ── Polling ────────────────────────────────────
 async function pollForResult() {
   try {
     const res  = await fetch(`${API}/status`);
     const data = await res.json();
+    if (data.status === 'awaiting_format') {
+      // Uploaded WAV finished transcribing — show format modal
+      state = 'stopped';
+      setStatus('', 'TRANSCRIBED');
+      if (data.transcript) renderServerTranscript(data.transcript);
+      document.getElementById('startBtn').disabled = false;
+      document.getElementById('uploadBtn').disabled = false;
+      reopenFormatModal();
+      return;
+    }
     if (data.status === 'done') {
       state = 'done';
       setStatus('done', 'DONE');
