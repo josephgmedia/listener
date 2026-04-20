@@ -2,3 +2,4 @@ recordings/
 __pycache__/
 *.pyc
 .env
+../calendar.secret
