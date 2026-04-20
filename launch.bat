@@ -7,7 +7,7 @@ start "Listener Server" cmd /k ""C:\Users\artist\AppData\Local\Programs\Python\P
 
 timeout /t 3 /nobreak > nul
 
-start "" "http://localhost:8765"
+start "" "http://localhost:8765/desktop"
 
 echo  Done - minimise this window, close "Listener Server" to stop.
 echo.
