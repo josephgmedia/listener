@@ -20,8 +20,11 @@ No bots. Nothing joins your call.
 ## Desktop setup (Windows)
 
 ### 1. Install dependencies
+Easiest — double-click `setup.bat`. It uses whichever `python` is on your PATH and installs everything from `requirements.txt`.
+
+Or run manually:
 ```
-pip install openai-whisper anthropic sounddevice soundfile numpy keyboard torch pydub
+pip install -r requirements.txt
 ```
 
 ### 2. Install FFmpeg
