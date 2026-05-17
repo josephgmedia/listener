@@ -993,13 +993,18 @@ function initRecognition() {
 
   r.onerror = (e) => {
     if (e.error === 'no-speech') return;
-    if (e.error === 'not-allowed') { toast('Mic access denied — check settings'); return; }
+    if (e.error === 'not-allowed') { toast('Mic access denied — check browser settings'); return; }
     toast('Mic error: ' + e.error);
   };
 
   r.onend = () => {
     if (isListening && !isPaused && !awaitingFormat) {
-      try { r.start(); } catch(ex) {}
+      // Use a fresh object + small delay — calling .start() immediately after .end
+      // throws InvalidStateError on mobile which silently kills the whole loop
+      setTimeout(() => {
+        recognition = initRecognition();
+        try { recognition.start(); } catch(ex) { console.warn('recognition restart failed', ex); }
+      }, 150);
     }
   };
 

@@ -324,22 +324,52 @@ header {
   color: var(--muted); line-height: 2.2;
 }
 
-.summary-body h3 {
-  font-family: 'Monument', sans-serif;
-  font-size: 15px; letter-spacing: 2.5px;
-  color: var(--highlight); margin: 20px 0 8px;
+.summary-body { padding-bottom: 16px; }
+.summary-section {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
 }
-.summary-body h3:first-child { margin-top: 0; }
-.summary-body ul { list-style: none; padding: 0; }
-.summary-body li {
-  padding: 6px 0 6px 16px; position: relative;
-  font-size: 13px; font-weight: 300;
-  color: #ccc; line-height: 1.7;
+.summary-section-head {
+  padding: 9px 14px;
   border-bottom: 1px solid var(--border);
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px; letter-spacing: 2px;
+  color: var(--muted2); text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px;
 }
-.summary-body li:last-child { border-bottom: none; }
-.summary-body li::before { content:'›'; position:absolute; left:0; color: var(--highlight); }
-.summary-body p { font-size: 13px; font-weight: 300; color: #bbb; line-height: 1.8; margin-bottom: 8px; }
+.summary-section-head::before {
+  content: ''; display: block; width: 5px; height: 5px;
+  border-radius: 50%; background: var(--highlight);
+  opacity: 0.5; flex-shrink: 0;
+}
+.summary-section-body { padding: 10px 14px; }
+.summary-body ul { list-style: none; padding: 0; margin: 0; }
+.summary-body li {
+  padding: 5px 0 5px 14px; position: relative;
+  font-size: 12.5px; font-weight: 300;
+  color: #c4c0ba; line-height: 1.65;
+}
+.summary-body li + li { border-top: 1px solid var(--border); }
+.summary-body li::before { content: '·'; position: absolute; left: 2px; top: 5px; color: var(--highlight); opacity: 0.6; font-size: 18px; line-height: 1; }
+.summary-body li strong { color: var(--text); font-weight: 400; }
+.summary-body p { font-size: 12.5px; font-weight: 300; color: #c4c0ba; line-height: 1.8; margin: 0 0 6px; }
+
+/* Transcript speaker turns */
+.speaker-turn { margin-bottom: 14px; }
+.speaker-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+  color: var(--highlight); opacity: 0.75; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+}
+.speaker-label .spk-time { color: var(--muted); opacity: 1; }
+.speaker-text {
+  font-size: 12.5px; font-weight: 300; color: #c4c0ba;
+  line-height: 1.7; border-left: 2px solid var(--border2); padding-left: 10px;
+}
 
 .processing-state {
   display: flex; flex-direction: column;
@@ -672,27 +702,22 @@ async function saveToNotion() {
   if (!token) { toast('Add Notion token in the format modal'); return false; }
   const now   = new Date();
   const title = now.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-  const props = {
-    Name:       { title:     [{ text: { content: title } }] },
-    Status:     { select:    { name: 'Done' } },
-    Date:       { date:      { start: now.toISOString().split('T')[0] } },
-    Transcript: { rich_text: richText(lastTranscript) },
-    Output:     { rich_text: richText(summaryRaw) },
-  };
-  if (selectedProject) props.Project = { select: { name: selectedProject } };
   try {
-    const res = await fetch('https://api.notion.com/v1/pages', {
+    const res = await fetch(`${API}/notion-save`, {
       method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json',
-        'Notion-Version': NOTION_VERSION,
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({ parent: { database_id: NOTION_DB_ID }, properties: props })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        db_id:      NOTION_DB_ID,
+        title,
+        date:       now.toISOString().split('T')[0],
+        project:    selectedProject || '',
+        output:     summaryRaw,
+        transcript: lastTranscript,
+      })
     });
     const data = await res.json();
-    if (data.object === 'error') throw new Error(data.message);
+    if (data.error) throw new Error(data.error);
     return true;
   } catch(e) {
     console.warn('Notion save failed:', e.message);
@@ -970,45 +995,76 @@ async function pollForResult() {
 
 // ── Transcript ─────────────────────────────────
 function renderServerTranscript(text) {
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
   const scroll = document.getElementById('transcriptScroll');
   scroll.innerHTML = '';
-  sentences.forEach((s, i) => {
-    if (!s.trim()) return;
-    const div = document.createElement('div');
-    div.className = 'segment';
-    div.innerHTML = `
-      <span class="seg-time">${String(Math.floor(i*3/60)).padStart(2,'0')}:${String((i*3)%60).padStart(2,'0')}</span>
-      <span class="seg-text">${s.trim()}</span>`;
-    scroll.appendChild(div);
-  });
-  document.getElementById('wordCount').textContent = `${text.split(' ').length} words`;
-  document.getElementById('segCount').textContent = `${sentences.length} segments`;
+  // Parse [SPEAKER_XX] MM:SS blocks from whisperx output
+  const turnPattern = /\[([^\]]+)\]\s*(\d{2}:\d{2})([\s\S]*?)(?=\n\[|$)/g;
+  let match, turns = [], wordCount = 0;
+  while ((match = turnPattern.exec(text)) !== null) {
+    const lines = match[3].trim().split('\n').map(l => l.trim()).filter(Boolean);
+    turns.push({ speaker: match[1], time: match[2], text: lines.join(' ') });
+    wordCount += lines.join(' ').split(' ').length;
+  }
+  // Fallback: plain text with no speaker markers
+  if (!turns.length) {
+    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+    sentences.forEach((s, i) => {
+      if (!s.trim()) return;
+      const div = document.createElement('div');
+      div.className = 'segment';
+      div.innerHTML = `<span class="seg-time">${String(Math.floor(i*3/60)).padStart(2,'0')}:${String((i*3)%60).padStart(2,'0')}</span><span class="seg-text">${s.trim()}</span>`;
+      scroll.appendChild(div);
+    });
+    wordCount = text.split(' ').length;
+  } else {
+    turns.forEach(turn => {
+      const div = document.createElement('div');
+      div.className = 'speaker-turn';
+      div.innerHTML = `
+        <div class="speaker-label">
+          <span>${turn.speaker}</span>
+          <span class="spk-time">${turn.time}</span>
+        </div>
+        <div class="speaker-text">${turn.text}</div>`;
+      scroll.appendChild(div);
+    });
+  }
+  document.getElementById('wordCount').textContent = `${wordCount} words`;
+  document.getElementById('segCount').textContent = `${turns.length || text.split('\n').length} segments`;
 }
 
 // ── Summary ────────────────────────────────────
 function renderSummary(text) {
   const lines = text.split('\n');
-  let html = '<div class="summary-body">', inList = false;
+  let html = '<div class="summary-body">';
+  let inSection = false, inList = false;
+
+  const closeList  = () => { if (inList)    { html += '</ul></div>'; inList = false; } };
+  const closeSection = () => { if (inSection) { closeList(); html += '</div>'; inSection = false; } };
+
   lines.forEach(line => {
     const h  = line.match(/^#{1,3}\s+(.+)/);
     const li = line.match(/^[-•*]\s+(.+)/);
     const nl = line.match(/^\d+\.\s+(.+)/);
+    const bold = s => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
     if (h) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<h3>${h[1]}</h3>`;
+      closeSection();
+      html += `<div class="summary-section"><div class="summary-section-head">${h[1]}</div><div class="summary-section-body">`;
+      inSection = true;
     } else if (li || nl) {
-      const c = li ? li[1] : nl[1];
       if (!inList) { html += '<ul>'; inList = true; }
-      html += `<li>${c}</li>`;
+      html += `<li>${bold((li ? li[1] : nl[1]))}</li>`;
+    } else if (line.match(/^---+$/)) {
+      // skip horizontal rules
     } else if (!line.trim()) {
-      if (inList) { html += '</ul>'; inList = false; }
+      closeList();
     } else {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<p>${line}</p>`;
+      closeList();
+      html += `<p>${bold(line)}</p>`;
     }
   });
-  if (inList) html += '</ul>';
+  closeSection();
   html += '</div>';
   document.getElementById('summaryScroll').innerHTML = html;
 }

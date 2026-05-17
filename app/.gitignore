@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 .env
 ../calendar.secret
+../calendar_notified.json
+../calendar_token.json

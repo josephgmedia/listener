@@ -1,103 +1,148 @@
 """
 Listener — Calendar Watcher
-Monitors Google Calendar and sends a Windows toast 1 minute before meetings start.
+Monitors Google Calendar via API and sends a Windows toast before meetings start.
 
 Setup:
-  1. Paste your Google Calendar iCal URL into ICAL_URL below
-  2. pip install icalendar requests
-  3. Add calendar_watcher_start.bat to your Windows Startup folder
+  1. Place credentials.json (from Google Cloud Console) next to this script
+  2. pip install google-auth-oauthlib google-api-python-client
+  3. Run once manually to authorise — browser will open, sign in, done
+  4. Add calendar_watcher_start.bat to your Windows Startup folder
 """
 
 import time
 import subprocess
-import requests
-from datetime import datetime, timezone
-from icalendar import Calendar
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
 
-# ── Config ────────────────────────────────────────────────────────────────────
-# iCal URL is stored in a separate file (calendar.secret) so it never hits GitHub.
-# Create that file next to this script and paste your iCal URL as the only line.
-import pathlib
-_secret = pathlib.Path(__file__).parent / "calendar.secret"
-ICAL_URL = _secret.read_text().strip() if _secret.exists() else "https://calendar.google.com/calendar/u/0?cid=am9lZ2l1ZmZyaWRhQHRoZWVsZWN0cmljY2FudmFzLmNvbS5hdQ"
-CHECK_INTERVAL  = 30     # seconds between calendar checks
-NOTIFY_BEFORE   = 90     # notify when meeting is within this many seconds
-                         # (90s window covers a 30s polling gap so nothing slips through)
-LISTENER_URL    = "http://localhost:8765/desktop"
+CHECK_INTERVAL = 30    # seconds between calendar checks
+NOTIFY_BEFORE  = 90    # notify when meeting is within this many seconds
 
-# ── Windows toast (no extra packages — uses PowerShell) ───────────────────────
-def send_toast(title, message):
-    ps = f"""
-$ErrorActionPreference = 'SilentlyContinue'
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null
-$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent(
-    [Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$nodes = $xml.GetElementsByTagName('text')
-$nodes.Item(0).AppendChild($xml.CreateTextNode('{title}')) | Out-Null
-$nodes.Item(1).AppendChild($xml.CreateTextNode('{message}')) | Out-Null
-$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Listener').Show($toast)
-"""
-    subprocess.run(
-        ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command", ps],
-        capture_output=True
+CREDS_FILE    = Path(__file__).parent / "credentials.json"
+TOKEN_FILE    = Path(__file__).parent / "calendar_token.json"
+NOTIFIED_FILE = Path(__file__).parent / "calendar_notified.json"
+LAUNCH_BAT    = Path(__file__).parent / "listener_open.bat"
+
+# ── Windows toast ─────────────────────────────────────────────────────────────
+def open_listener():
+    subprocess.Popen(
+        [str(LAUNCH_BAT)],
+        creationflags=0x08000000  # CREATE_NO_WINDOW
     )
+    import time, webbrowser
+    time.sleep(3)
+    webbrowser.open("http://localhost:8765/desktop")
 
-# ── Calendar fetch + parse ────────────────────────────────────────────────────
-def get_events():
+
+def send_toast(title, message):
     try:
-        resp = requests.get(ICAL_URL, timeout=10)
-        resp.raise_for_status()
-        cal = Calendar.from_ical(resp.content)
+        from winotify import Notification, audio
+        toast = Notification(
+            app_id="Listener",
+            title=title,
+            msg=message,
+            duration="long",
+            launch=str(LAUNCH_BAT)
+        )
+        toast.set_audio(audio.Default, loop=False)
+        toast.add_actions(label="Open Listener", launch=str(LAUNCH_BAT))
+        toast.show()
+    except Exception as e:
+        print(f"  [toast error] {e}")
+        subprocess.Popen(
+            ["powershell", "-WindowStyle", "Hidden", "-NonInteractive", "-Command",
+             f"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); "
+             f"[System.Windows.Forms.MessageBox]::Show('{message}', '{title}')"],
+        )
+
+
+# ── Google Calendar auth ──────────────────────────────────────────────────────
+def get_calendar_service():
+    from google.oauth2.credentials import Credentials
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+    creds  = None
+
+    if TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow  = InstalledAppFlow.from_client_secrets_file(str(CREDS_FILE), SCOPES)
+            creds = flow.run_local_server(port=0)
+        TOKEN_FILE.write_text(creds.to_json())
+
+    return build("calendar", "v3", credentials=creds)
+
+
+# ── Fetch upcoming events ─────────────────────────────────────────────────────
+def get_events(service):
+    try:
+        now      = datetime.now(timezone.utc)
+        time_min = now.isoformat()
+        time_max = (now + timedelta(hours=12)).isoformat()
+
+        result = service.events().list(
+            calendarId  = "primary",
+            timeMin     = time_min,
+            timeMax     = time_max,
+            singleEvents= True,
+            orderBy     = "startTime",
+            maxResults  = 20,
+        ).execute()
+
         events = []
-        for component in cal.walk():
-            if component.name != "VEVENT":
-                continue
-            dtstart = component.get("DTSTART")
-            if not dtstart:
-                continue
-            start = dtstart.dt
-            # Handle all-day events (date only, no time) — skip them
-            if not isinstance(start, datetime):
-                continue
-            # Ensure timezone-aware
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
+        for item in result.get("items", []):
+            start = item["start"].get("dateTime")
+            if not start:
+                continue   # skip all-day events
+            start_dt = datetime.fromisoformat(start)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
             events.append({
-                "summary": str(component.get("SUMMARY", "Meeting")),
-                "start":   start,
-                "uid":     str(component.get("UID", "")),
+                "summary": item.get("summary", "Meeting"),
+                "start":   start_dt,
+                "uid":     item.get("id", ""),
             })
         return events
     except Exception as e:
         print(f"  [calendar] fetch error: {e}")
         return []
 
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 def main():
-    if ICAL_URL == "PASTE_YOUR_ICAL_URL_HERE":
+    if not CREDS_FILE.exists():
         print("=" * 55)
-        print("  ERROR: No iCal URL set.")
-        print("  Open calendar_watcher.py and paste your")
-        print("  Google Calendar iCal URL into ICAL_URL.")
+        print("  ERROR: credentials.json not found.")
+        print(f"  Expected: {CREDS_FILE}")
         print("=" * 55)
         input("Press Enter to exit...")
         return
 
+    print("  Authorising with Google Calendar...")
+    service = get_calendar_service()
     print(f"  Listener Calendar Watcher started — checking every {CHECK_INTERVAL}s")
 
-    notified = set()   # UIDs we've already fired a notification for
+    # Load previously notified UIDs so restarts don't re-fire
+    import json
+    notified   = set(json.loads(NOTIFIED_FILE.read_text()) if NOTIFIED_FILE.exists() else [])
+    started_at = datetime.now(timezone.utc)
 
     while True:
         now    = datetime.now(timezone.utc)
-        events = get_events()
+        events = get_events(service)
 
         for ev in events:
             seconds_until = (ev["start"] - now).total_seconds()
             uid           = ev["uid"] or (ev["summary"] + str(ev["start"]))
 
-            if 0 < seconds_until <= NOTIFY_BEFORE and uid not in notified:
+            just_started = (now - started_at).total_seconds() < 10
+            if 0 < seconds_until <= NOTIFY_BEFORE and uid not in notified and not just_started:
                 notified.add(uid)
                 mins = int(seconds_until // 60)
                 secs = int(seconds_until % 60)
@@ -108,12 +153,10 @@ def main():
                     ev["summary"]
                 )
 
-        # Clean up old UIDs from notified set to avoid unbounded growth
-        cutoff = now.timestamp()
-        notified = {uid for uid in notified
-                    if any(uid == (ev["uid"] or ev["summary"] + str(ev["start"]))
-                           and ev["start"].timestamp() > cutoff - 3600
-                           for ev in events)}
+        # Prune old UIDs and persist to disk
+        active_uids = {ev["uid"] for ev in events}
+        notified    = notified & active_uids
+        NOTIFIED_FILE.write_text(json.dumps(list(notified)))
 
         time.sleep(CHECK_INTERVAL)
 
