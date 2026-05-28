@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Listener — Co-pilot</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@300;400;600&display=swap');
+@font-face {
+  font-family: 'Monument';
+  src: url('fonts/MonumentExtended-Regular.otf') format('opentype');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'Monument';
+  src: url('fonts/MonumentExtended-Ultrabold.otf') format('opentype');
+  font-weight: 800;
+}
+
+:root {
+  --bg:        #080808;
+  --surface:   #111111;
+  --surface2:  #191919;
+  --border:    #1e1e1e;
+  --border2:   #2a2a2a;
+  --accent:    #3931df;
+  --accent-h:  #4f49f5;
+  --highlight: #49abff;
+  --gold:      #ffb84a;
+  --text:      #edeae4;
+  --muted:     #666;
+  --muted2:    #999;
+  --green:     #4ade80;
+  --red:       #ff3b3b;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%; background: var(--bg); color: var(--text);
+  font-family: 'Barlow', sans-serif; font-weight: 300; font-size: 14px; overflow: hidden;
+}
+button { cursor: pointer; font-family: inherit; }
+
+.app {
+  display: grid;
+  grid-template-rows: 56px 1fr;
+  grid-template-columns: 1fr 1fr;
+  height: 100vh;
+}
+header {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.logo {
+  font-family: 'Monument', sans-serif; font-weight: 800; font-size: 16px;
+  letter-spacing: 4px;
+}
+.logo em { color: var(--accent); font-style: normal; }
+.logo .sub { color: var(--muted2); font-weight: 400; font-size: 11px; margin-left: 12px; letter-spacing: 2px; }
+.header-right { display: flex; align-items: center; gap: 16px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.5 } }
+.status-text { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted2); }
+.btn {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border2);
+  padding: 10px 18px; font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent-h); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+.btn.primary:hover { background: var(--accent-h); }
+.btn.danger:hover { border-color: var(--red); color: var(--red); }
+.back-link {
+  color: var(--muted2); font-size: 11px; letter-spacing: 2px; text-decoration: none;
+  text-transform: uppercase;
+}
+.back-link:hover { color: var(--highlight); }
+
+/* LEFT — live transcript */
+.transcript-pane {
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pane-header {
+  padding: 14px 24px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--surface);
+}
+.pane-title {
+  font-family: 'Monument', sans-serif; font-weight: 400; font-size: 11px;
+  letter-spacing: 3px; text-transform: uppercase; color: var(--muted2);
+}
+.pane-meta { font-size: 10px; color: var(--muted); letter-spacing: 1px; }
+.scroll { flex: 1; overflow-y: auto; padding: 16px 24px; }
+.scroll::-webkit-scrollbar { width: 6px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+.transcript-line {
+  margin-bottom: 10px; line-height: 1.55; color: var(--text); font-size: 14px;
+  display: flex; gap: 12px;
+}
+.transcript-line .t { color: var(--muted); font-size: 11px; letter-spacing: 1px; min-width: 70px; padding-top: 2px; }
+.transcript-line .text { flex: 1; }
+
+.empty {
+  color: var(--muted); text-align: center; padding: 60px 20px; font-size: 13px;
+  letter-spacing: 1px;
+}
+
+/* RIGHT — suggestions */
+.suggest-pane {
+  background: var(--bg);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.live-suggestion {
+  padding: 24px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  min-height: 200px;
+  max-height: 50%;
+  overflow-y: auto;
+}
+.suggest-label {
+  font-family: 'Monument', sans-serif; font-weight: 400; font-size: 10px;
+  letter-spacing: 3px; text-transform: uppercase; color: var(--gold);
+  margin-bottom: 12px;
+}
+.suggest-trigger {
+  font-size: 11px; color: var(--muted2); letter-spacing: 1px; margin-bottom: 14px;
+  font-style: italic; line-height: 1.4;
+}
+.suggest-text {
+  font-size: 22px; line-height: 1.45; color: var(--text); font-weight: 400;
+}
+.suggest-text.empty { font-size: 14px; color: var(--muted); font-style: italic; padding: 30px 0; }
+
+.history {
+  flex: 1; overflow-y: auto; padding: 16px 24px;
+}
+.history-item {
+  border-left: 2px solid var(--border2); padding: 10px 14px; margin-bottom: 14px;
+  background: var(--surface);
+}
+.history-item .h-t { font-size: 10px; color: var(--muted); letter-spacing: 1px; margin-bottom: 6px; }
+.history-item .h-trigger { font-size: 11px; color: var(--muted2); font-style: italic; margin-bottom: 6px; }
+.history-item .h-text { font-size: 13px; line-height: 1.45; color: var(--text); }
+
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--surface2); border: 1px solid var(--border2); padding: 10px 20px;
+  font-size: 12px; letter-spacing: 1px; opacity: 0; transition: opacity 0.25s;
+  pointer-events: none; z-index: 1000;
+}
+.toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <span class="logo">LIST<em>E</em>NER<span class="sub">CO-PILOT</span></span>
+    </div>
+    <div class="header-right">
+      <div class="dot" id="liveDot"></div>
+      <div class="status-text" id="statusText">IDLE</div>
+      <button class="btn primary" id="toggleBtn" onclick="toggleCopilot()">Start Co-pilot</button>
+      <a class="back-link" href="/desktop">← Recorder</a>
+    </div>
+  </header>
+
+  <section class="transcript-pane">
+    <div class="pane-header">
+      <div class="pane-title">Live transcript</div>
+      <div class="pane-meta" id="transcriptMeta">0 lines</div>
+    </div>
+    <div class="scroll" id="transcriptScroll">
+      <div class="empty" id="transcriptEmpty">
+        Hit <strong>Start Co-pilot</strong>. Whisper transcribes every 8s.<br>
+        Suggestions appear on the right when the other party asks you something.
+      </div>
+    </div>
+  </section>
+
+  <section class="suggest-pane">
+    <div class="live-suggestion">
+      <div class="suggest-label">Latest suggestion</div>
+      <div class="suggest-trigger" id="suggestTrigger"></div>
+      <div class="suggest-text empty" id="suggestText">Nothing yet. Suggestions appear here when Claude detects a question for you.</div>
+    </div>
+    <div class="pane-header">
+      <div class="pane-title">History</div>
+      <div class="pane-meta" id="historyMeta">0 suggestions</div>
+    </div>
+    <div class="history" id="historyScroll"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let active = false;
+let transcriptTotal = 0;
+let suggestionsTotal = 0;
+let pollHandle = null;
+let lastSuggestion = null;
+
+async function toggleCopilot() {
+  const btn = document.getElementById('toggleBtn');
+  btn.disabled = true;
+  try {
+    if (!active) {
+      const r = await fetch('/copilot/start', { method: 'POST' });
+      const data = await r.json();
+      if (data.error) {
+        toast(data.error);
+        btn.disabled = false;
+        return;
+      }
+      active = true;
+      btn.textContent = 'Stop Co-pilot';
+      btn.classList.remove('primary');
+      btn.classList.add('danger');
+      document.getElementById('liveDot').classList.add('live');
+      document.getElementById('statusText').textContent = 'LIVE — ' + data.loopback;
+      transcriptTotal = 0;
+      suggestionsTotal = 0;
+      document.getElementById('transcriptScroll').innerHTML = '';
+      document.getElementById('historyScroll').innerHTML = '';
+      document.getElementById('suggestText').textContent = 'Listening…';
+      document.getElementById('suggestText').classList.add('empty');
+      document.getElementById('suggestTrigger').textContent = '';
+      startPolling();
+      toast('Co-pilot started — Whisper "small" warming up. First chunk ~' + data.chunk_seconds + 's.');
+    } else {
+      const r = await fetch('/copilot/stop', { method: 'POST' });
+      const data = await r.json();
+      active = false;
+      btn.textContent = 'Start Co-pilot';
+      btn.classList.add('primary');
+      btn.classList.remove('danger');
+      document.getElementById('liveDot').classList.remove('live');
+      document.getElementById('statusText').textContent = 'STOPPED';
+      stopPolling();
+      toast('Stopped. ' + (data.transcript_lines || 0) + ' lines, ' + (data.suggestions || 0) + ' suggestions.');
+    }
+  } catch (e) {
+    toast('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function startPolling() {
+  if (pollHandle) clearInterval(pollHandle);
+  pollHandle = setInterval(poll, 1500);
+  poll();
+}
+function stopPolling() {
+  if (pollHandle) clearInterval(pollHandle);
+  pollHandle = null;
+}
+
+async function poll() {
+  try {
+    const r = await fetch('/copilot/state?since_t=' + transcriptTotal + '&since_s=' + suggestionsTotal);
+    const data = await r.json();
+
+    // Append new transcript lines
+    if (data.transcript && data.transcript.length) {
+      const scroll = document.getElementById('transcriptScroll');
+      const empty = document.getElementById('transcriptEmpty');
+      if (empty) empty.remove();
+      data.transcript.forEach(line => {
+        const div = document.createElement('div');
+        div.className = 'transcript-line';
+        const t = document.createElement('div'); t.className = 't'; t.textContent = line.t;
+        const tx = document.createElement('div'); tx.className = 'text'; tx.textContent = line.text;
+        div.appendChild(t); div.appendChild(tx);
+        scroll.appendChild(div);
+      });
+      scroll.scrollTop = scroll.scrollHeight;
+    }
+    transcriptTotal = data.transcript_total;
+    document.getElementById('transcriptMeta').textContent = transcriptTotal + ' lines';
+
+    // Append new suggestions
+    if (data.suggestions && data.suggestions.length) {
+      data.suggestions.forEach(s => {
+        // Move the previously-live suggestion into history first
+        if (lastSuggestion) {
+          const histItem = document.createElement('div');
+          histItem.className = 'history-item';
+          histItem.innerHTML = '<div class="h-t">' + escapeHtml(lastSuggestion.t) + '</div>' +
+            '<div class="h-trigger">Re: ' + escapeHtml(lastSuggestion.trigger || '') + '</div>' +
+            '<div class="h-text">' + escapeHtml(lastSuggestion.text) + '</div>';
+          const hist = document.getElementById('historyScroll');
+          hist.insertBefore(histItem, hist.firstChild);
+        }
+        lastSuggestion = s;
+        document.getElementById('suggestText').textContent = s.text;
+        document.getElementById('suggestText').classList.remove('empty');
+        document.getElementById('suggestTrigger').textContent = s.trigger ? 'Re: ' + s.trigger : '';
+      });
+    }
+    suggestionsTotal = data.suggestions_total;
+    document.getElementById('historyMeta').textContent = suggestionsTotal + ' suggestions';
+  } catch (e) {
+    // Server probably restarting — keep polling.
+  }
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// Initial: check whether co-pilot is already running on the server
+fetch('/copilot/state').then(r => r.json()).then(data => {
+  if (data.active) {
+    active = true;
+    const btn = document.getElementById('toggleBtn');
+    btn.textContent = 'Stop Co-pilot';
+    btn.classList.remove('primary');
+    btn.classList.add('danger');
+    document.getElementById('liveDot').classList.add('live');
+    document.getElementById('statusText').textContent = 'LIVE';
+    transcriptTotal = 0;
+    suggestionsTotal = 0;
+    startPolling();
+  }
+}).catch(() => {});
+</script>
+</body>
+</html>
