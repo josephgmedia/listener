@@ -61,22 +61,6 @@ Controls during recording: `SPACE` to pause, `S` to stop, `Q` to quit.
 
 ---
 
-## Co-pilot mode (real-time Q&A)
-
-Open `http://localhost:8765/copilot` (or click "Co-pilot mode" from the recorder).
-
-While you're on a call, Listener transcribes the loopback + your mic every 8 seconds. Claude Haiku watches the rolling transcript and only chimes in when it detects the **other party** has asked you a question — then it surfaces a 1–3 sentence suggested answer in big readable text on the right pane.
-
-**Latency:** ~10–13 seconds from Peter's question to suggestion appearing (8s chunk + Whisper "small" + Haiku roundtrip). Whisper's first chunk also has a one-off 5–10s warm-up. This isn't instant but it's fast enough to read while Peter is still talking through their point.
-
-**Limitations:**
-- Audio is mixed (loopback + mic). Claude tries to ignore questions you ask yourself, but Whisper can't perfectly attribute who said what.
-- Suggestions are best-effort — treat them as prompts, not scripts.
-- Every 8s chunk that contains audio calls Claude Haiku. Cheap, but not free over long calls.
-- Co-pilot and batch recording can't run simultaneously (same audio devices).
-
----
-
 ## Audio device priority
 
 The script auto-detects the best loopback device in this order:
