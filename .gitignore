@@ -1,0 +1,8 @@
+calendar_token.json
+*.json
+!package.json
+!package-lock.json
+
+node_modules/
+.env
+.env.local
