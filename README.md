@@ -24,6 +24,24 @@ No bots. Nothing joins your call.
 pip install openai-whisper anthropic sounddevice soundfile numpy keyboard torch pydub
 ```
 
+**Optional — ad-hoc call detection** (auto-detects when you're on a Zoom/Teams/Meet/etc. call without a calendar match):
+```
+pip install psutil pywin32 pycaw comtypes
+```
+All three are optional and independent — install some, all, or none. Listener will use whatever's available and degrade gracefully when something's missing. Without any of them, Listener still works exactly as before, just without ad-hoc call detection.
+
+**Optional — calendar awareness** (auto-fills meeting context from Google Calendar):
+```
+pip install google-auth google-auth-oauthlib google-api-python-client
+```
+
+Add multiple Google accounts (personal + work Gmail):
+```
+python add_calendar_account.py personal
+python add_calendar_account.py work
+```
+Each command opens Google sign-in for ONE account and saves its token as `calendar_token_<label>.json`. Listener checks all connected accounts and surfaces whichever meeting is starting first (or in progress). The original `calendar_token.json` from `calendar_watcher.py` still works as the primary account — nothing breaks.
+
 ### 2. Install FFmpeg
 Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH, or drop `ffmpeg.exe` in the same folder as `server.py`.
 

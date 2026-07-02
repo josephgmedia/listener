@@ -146,6 +146,63 @@ header {
 }
 .server-pill.connected { border-color: var(--highlight); color: var(--highlight); }
 
+/* ── CALENDAR BANNER (Granola-style meeting awareness) ── */
+.cal-banner {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-family: 'Barlow', sans-serif;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  color: var(--text);
+}
+.cal-banner.visible { display: flex; }
+.cal-banner .cal-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--highlight);
+  flex-shrink: 0;
+}
+.cal-banner.live    .cal-dot { background: var(--red);    animation: cal-pulse 1.6s infinite; }
+.cal-banner.ad-hoc  .cal-dot { background: #f5a623;       animation: cal-pulse 1.8s infinite; }
+.cal-banner.ad-hoc  .cal-status { color: #f5a623; }
+@keyframes cal-pulse { 0%,100% { opacity:1 } 50% { opacity:0.35 } }
+.cal-banner .cal-label {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted2);
+}
+.cal-banner .cal-title {
+  font-weight: 500;
+  color: var(--text);
+}
+.cal-banner .cal-when {
+  color: var(--muted2);
+  font-size: 11px;
+}
+.cal-banner .cal-spacer { flex: 1; }
+.cal-banner .cal-dismiss {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+.cal-banner .cal-dismiss:hover { color: var(--text); border-color: var(--muted2); }
+.cal-banner .cal-status {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--highlight);
+}
+
 /* ── LEFT PANEL ───────────────────────────────── */
 .left {
   border-right: 1px solid var(--border);
@@ -404,6 +461,93 @@ header {
 .copy-btn:hover  { border-color: var(--highlight); color: var(--highlight); }
 .copy-btn:active { transform: scale(0.97); }
 
+/* ── REVIEW STRIP (between summary and footer) ── */
+.review-strip {
+  display: none;
+  padding: 14px 18px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.review-strip.visible { display: block; }
+.review-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.review-label {
+  font-family: 'Barlow', sans-serif;
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--muted2);
+  width: 60px;
+  flex-shrink: 0;
+}
+.review-proj { display: flex; gap: 4px; flex: 1; }
+.proj-btn-sm {
+  flex: 1; padding: 5px 0;
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-family: 'Barlow', sans-serif;
+  font-size: 10px; letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: border-color 0.15s, color 0.15s;
+}
+.proj-btn-sm:hover    { border-color: var(--border2); color: var(--text); }
+.proj-btn-sm.selected { border-color: var(--highlight); color: var(--highlight); }
+.review-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 6px 8px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  border-radius: var(--radius);
+  outline: none;
+}
+.review-input:focus { border-color: var(--highlight); }
+.save-btn {
+  width: 100%;
+  margin-top: 4px;
+  padding: 11px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px; letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: background 0.15s, transform 0.1s;
+}
+.save-btn:hover  { background: var(--accent-h); }
+.save-btn:active { transform: scale(0.98); }
+.save-btn.saved {
+  background: transparent;
+  border-color: var(--highlight);
+  color: var(--highlight);
+  cursor: default;
+}
+.save-btn.failed {
+  background: transparent;
+  border-color: var(--red);
+  color: var(--red);
+}
+.save-btn:disabled { opacity: 0.6; cursor: default; }
+.review-hint {
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px; letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 6px;
+}
+
 /* ── FORMAT MODAL ─────────────────────────────── */
 .fmodal {
   position: fixed; inset: 0;
@@ -548,6 +692,17 @@ header {
     <div class="server-pill" id="serverPill" role="status">Server: checking...</div>
   </header>
 
+  <!-- CALENDAR BANNER — auto-detected meeting context -->
+  <div class="cal-banner" id="calBanner" role="status" aria-live="polite">
+    <div class="cal-dot" id="calDot"></div>
+    <div class="cal-label" id="calStatus">DETECTED</div>
+    <div class="cal-title" id="calTitle">—</div>
+    <div class="cal-when" id="calWhen"></div>
+    <div class="cal-spacer"></div>
+    <div class="cal-status" id="calApplied">CONTEXT FILLED</div>
+    <button class="cal-dismiss" id="calDismiss" onclick="dismissCalBanner()" aria-label="Dismiss meeting suggestion" title="Wrong meeting? Click to clear">×</button>
+  </div>
+
   <!-- LEFT -->
   <div class="left" role="complementary" aria-label="Controls">
     <div class="panel-block">
@@ -600,9 +755,27 @@ header {
         <p>Hit Stop &amp; Summarise<br>when you're done.<br><br>Claude formats it<br>for you.</p>
       </div>
     </div>
+
+    <!-- REVIEW STRIP — only visible after Claude finishes, before Notion save -->
+    <div class="review-strip" id="reviewStrip" aria-label="Review and save">
+      <div class="review-row">
+        <div class="review-label">PROJECT</div>
+        <div class="review-proj">
+          <button type="button" class="proj-btn-sm" data-name="TEC"       onclick="reviewProj(this,'TEC')">TEC</button>
+          <button type="button" class="proj-btn-sm" data-name="Freelance" onclick="reviewProj(this,'Freelance')">Freelance</button>
+          <button type="button" class="proj-btn-sm" data-name="Personal"  onclick="reviewProj(this,'Personal')">Personal</button>
+        </div>
+      </div>
+      <div class="review-row">
+        <div class="review-label">CONTEXT</div>
+        <input id="reviewContext" type="text" placeholder="e.g. Pre-prod sync with Peter" class="review-input">
+      </div>
+      <button class="save-btn" id="saveBtn" onclick="confirmAndSave()">Save to Notion</button>
+      <div class="review-hint" id="reviewHint">Edit if needed, then save</div>
+    </div>
+
     <div class="right-footer" id="rightFooter">
       <button class="copy-btn" onclick="copySummary()">Copy Summary</button>
-      <button class="copy-btn" id="notionRetryBtn" style="display:none;margin-top:6px" onclick="saveToNotion().then(ok=>{if(ok){this.style.display='none';toast('Saved to Notion ✓');}else{toast('Still failing — check token');}})">Retry Save to Notion</button>
     </div>
   </aside>
 
@@ -642,6 +815,11 @@ header {
         <button class="proj-btn" onclick="selectProj(this,'Freelance')">Freelance</button>
         <button class="proj-btn" onclick="selectProj(this,'Personal')">Personal</button>
       </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <div style="font-family:'Barlow',sans-serif;font-size:10px;letter-spacing:1px;color:var(--muted2);margin-bottom:6px">CONTEXT</div>
+      <input id="contextField" type="text" placeholder="e.g. Pre-prod sync with Peter"
+        style="width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:8px 10px;font-size:12px;font-family:'Barlow',sans-serif;border-radius:4px;outline:none">
     </div>
     <div style="margin-bottom:12px">
       <div style="font-family:'Barlow',sans-serif;font-size:10px;letter-spacing:1px;color:var(--muted2);margin-bottom:6px">NOTION TOKEN</div>
@@ -684,10 +862,136 @@ let selectedProject = null;
 function getKey(k)      { return localStorage.getItem('listener_' + k + '_key') || ''; }
 function saveKey(k, v)  { localStorage.setItem('listener_' + k + '_key', v); }
 
+// ── Awareness: calendar + ad-hoc call detection ──
+// Banner has three states managed here:
+//   "scheduled" — calendar found a real meeting (blue if soon, red if live)
+//   "ad-hoc"    — no calendar match but /call-detect saw a Zoom/Meet/Teams call (amber)
+//   "hidden"    — nothing to surface (or user dismissed)
+//
+// Calendar wins over call detection — a scheduled meeting is more specific
+// than "you've got a comms app open". The poll runs every 10s while idle so
+// the banner appears as soon as you open a Meet/Zoom for an unscheduled call.
+
+let detectedMeeting    = null;   // cached meeting from /calendar-now
+let detectedCall       = null;   // cached call from /call-detect (ad-hoc)
+let lastBannerSig      = '';     // identity of what's currently displayed
+let dismissedSig       = '';     // last dismissed identity — re-show if it changes
+let pollAwarenessTimer = null;
+
+function bannerIdentity(kind, payload) {
+  if (kind === 'scheduled') return 'cal:' + (payload.uid || payload.title);
+  if (kind === 'ad-hoc')    return 'call:' + (payload.apps || []).join(',');
+  return '';
+}
+
+async function pollAwareness() {
+  // Don't fight the user during recording / processing — only poll while idle
+  if (state !== 'idle' && state !== 'done') return;
+
+  let cal = null, call = null;
+  try {
+    const [calRes, callRes] = await Promise.allSettled([
+      fetch(`${API}/calendar-now`).then(r => r.json()),
+      fetch(`${API}/call-detect`).then(r => r.json()),
+    ]);
+    cal  = (calRes.status  === 'fulfilled') ? calRes.value  : null;
+    call = (callRes.status === 'fulfilled') ? callRes.value : null;
+  } catch(e) {
+    console.warn('Awareness poll failed:', e.message);
+    return;
+  }
+
+  // 1. Scheduled meeting from calendar wins
+  if (cal && cal.connected && cal.title) {
+    const sig = bannerIdentity('scheduled', cal);
+    if (sig === dismissedSig) return;       // user already dismissed this one
+    detectedMeeting = cal;
+    detectedCall    = null;
+    showBannerScheduled(cal);
+    autofillContextIfEmpty(cal.title);
+    lastBannerSig = sig;
+    return;
+  }
+
+  // 2. Ad-hoc call detected by /call-detect (confidence: high or medium)
+  if (call && call.detected && (call.confidence === 'high' || call.confidence === 'medium')) {
+    const sig = bannerIdentity('ad-hoc', call);
+    if (sig === dismissedSig) return;
+    detectedCall    = call;
+    detectedMeeting = null;
+    showBannerAdhoc(call);
+    autofillContextIfEmpty(`Unscheduled — ${(call.apps[0] || 'call')}`);
+    lastBannerSig = sig;
+    return;
+  }
+
+  // 3. Nothing detected — hide if showing
+  if (lastBannerSig) {
+    document.getElementById('calBanner').classList.remove('visible', 'live', 'ad-hoc');
+    lastBannerSig = '';
+  }
+}
+
+function autofillContextIfEmpty(value) {
+  const ctxEl = document.getElementById('contextField');
+  if (ctxEl && !ctxEl.value.trim()) ctxEl.value = value;
+}
+
+function showBannerScheduled(m) {
+  const banner = document.getElementById('calBanner');
+  document.getElementById('calTitle').textContent  = m.title;
+  document.getElementById('calStatus').textContent = m.in_progress ? 'LIVE NOW' : 'STARTING SOON';
+  const mins = Math.round(Math.abs(m.secs_until_start) / 60);
+  document.getElementById('calWhen').textContent =
+    m.in_progress
+      ? (mins > 0 ? `· started ${mins}m ago` : '· just started')
+      : `· in ${mins || '<1'} min`;
+  document.getElementById('calApplied').textContent = 'CONTEXT FILLED';
+  banner.classList.remove('ad-hoc');
+  banner.classList.toggle('live', !!m.in_progress);
+  banner.classList.add('visible');
+}
+
+function showBannerAdhoc(call) {
+  const banner = document.getElementById('calBanner');
+  const app    = call.apps[0] || 'call';
+  document.getElementById('calTitle').textContent  = `Unscheduled · ${app}`;
+  document.getElementById('calStatus').textContent = 'CALL DETECTED';
+  document.getElementById('calWhen').textContent   = `· ${call.confidence} confidence`;
+  document.getElementById('calApplied').textContent = 'TAP RECORD';
+  banner.classList.remove('live');
+  banner.classList.add('ad-hoc', 'visible');
+}
+
+function dismissCalBanner() {
+  // Dismiss the CURRENT identity. If something different shows up later
+  // (different meeting, different call), the banner re-appears.
+  dismissedSig = lastBannerSig;
+  detectedMeeting = null;
+  detectedCall    = null;
+  document.getElementById('calBanner').classList.remove('visible', 'live', 'ad-hoc');
+  lastBannerSig = '';
+  // Clear context so the user starts fresh
+  const ctxEl = document.getElementById('contextField');
+  if (ctxEl) ctxEl.value = '';
+  toast('Cleared — type your own context');
+}
+
+// Back-compat: kept so the existing call site in checkServer still works.
+async function loadCalendarMeeting() {
+  await pollAwareness();
+  if (!pollAwarenessTimer) {
+    pollAwarenessTimer = setInterval(pollAwareness, 10000);
+  }
+}
+
 function selectProj(el, name) {
   document.querySelectorAll('.proj-btn').forEach(b => b.classList.remove('selected'));
   if (selectedProject === name) { selectedProject = null; }
   else { el.classList.add('selected'); selectedProject = name; }
+  // Persist last selection so it's remembered next time the app opens
+  if (selectedProject) localStorage.setItem('listener_last_project', selectedProject);
+  else                 localStorage.removeItem('listener_last_project');
 }
 
 function richText(str) {
@@ -695,6 +999,72 @@ function richText(str) {
   for (let i = 0; i < str.length; i += 2000)
     chunks.push({ text: { content: str.slice(i, i + 2000) } });
   return chunks.length ? chunks : [{ text: { content: '' } }];
+}
+
+// ── Review strip (between Claude summary and Notion save) ──
+let reviewSaved = false;  // true once successfully saved this session
+
+function showReviewStrip() {
+  reviewSaved = false;
+  const strip = document.getElementById('reviewStrip');
+  // Seed from values the user set in the format modal
+  const startCtx  = (document.getElementById('contextField')?.value || '').trim();
+  document.getElementById('reviewContext').value = startCtx;
+  // Mirror selectedProject onto the small review buttons
+  document.querySelectorAll('.proj-btn-sm').forEach(b => {
+    b.classList.toggle('selected', b.dataset.name === selectedProject);
+  });
+  // Reset save button to fresh state
+  const btn = document.getElementById('saveBtn');
+  btn.textContent = 'Save to Notion';
+  btn.className   = 'save-btn';
+  btn.disabled    = false;
+  document.getElementById('reviewHint').textContent = 'Edit if needed, then save';
+  strip.classList.add('visible');
+}
+
+function reviewProj(el, name) {
+  // Same toggle pattern as the main project buttons
+  document.querySelectorAll('.proj-btn-sm').forEach(b => b.classList.remove('selected'));
+  if (selectedProject === name) {
+    selectedProject = null;
+  } else {
+    el.classList.add('selected');
+    selectedProject = name;
+  }
+  // Persist so this also becomes the new sticky default
+  if (selectedProject) localStorage.setItem('listener_last_project', selectedProject);
+  else                 localStorage.removeItem('listener_last_project');
+}
+
+async function confirmAndSave() {
+  if (reviewSaved) return;
+  const btn  = document.getElementById('saveBtn');
+  const hint = document.getElementById('reviewHint');
+  // Mirror the review context back to the canonical contextField
+  // so saveToNotion() picks it up from its existing source.
+  const ctxVal = document.getElementById('reviewContext').value.trim();
+  const ctxEl  = document.getElementById('contextField');
+  if (ctxEl) ctxEl.value = ctxVal;
+
+  btn.disabled    = true;
+  btn.textContent = 'Saving…';
+  btn.className   = 'save-btn';
+
+  const ok = await saveToNotion();
+  if (ok) {
+    reviewSaved     = true;
+    btn.textContent = 'Saved to Notion ✓';
+    btn.className   = 'save-btn saved';
+    hint.textContent = `Saved · project: ${selectedProject || '—'}`;
+    toast('Saved to Notion ✓');
+  } else {
+    btn.disabled    = false;
+    btn.textContent = 'Retry Save to Notion';
+    btn.className   = 'save-btn failed';
+    hint.textContent = 'Save failed — check token, then retry';
+    toast('Save failed — check token');
+  }
 }
 
 async function saveToNotion() {
@@ -712,6 +1082,7 @@ async function saveToNotion() {
         title,
         date:       now.toISOString().split('T')[0],
         project:    selectedProject || '',
+        context:    (document.getElementById('contextField')?.value || '').trim(),
         output:     summaryRaw,
         transcript: lastTranscript,
       })
@@ -732,6 +1103,15 @@ window.onload = () => {
   const nk = getKey('notion');
   if (nk) document.getElementById('notionTokenField').value = nk;
 
+  // Restore last-used project selection
+  const lastProj = localStorage.getItem('listener_last_project');
+  if (lastProj) {
+    selectedProject = lastProj;
+    document.querySelectorAll('.proj-btn').forEach(b => {
+      if (b.textContent.trim() === lastProj) b.classList.add('selected');
+    });
+  }
+
   // Format option toggles
   document.querySelectorAll('.fopt').forEach(opt => {
     opt.addEventListener('click', () => {
@@ -747,6 +1127,7 @@ window.onload = () => {
   });
 };
 
+let calendarCheckedOnce = false;
 async function checkServer() {
   try {
     const res = await fetch(`${API}/status`);
@@ -757,6 +1138,11 @@ async function checkServer() {
     document.getElementById('serverPill').classList.add('connected');
     document.getElementById('loopbackName').textContent = data.loopback_device || 'Not found';
     document.getElementById('micName').textContent = data.mic_device || 'Not found';
+    // First successful server connect → check calendar for an active meeting
+    if (!calendarCheckedOnce) {
+      calendarCheckedOnce = true;
+      loadCalendarMeeting();
+    }
     setTimeout(refreshStatus, 5000);
   } catch(e) {
     if (!serverOk) {
@@ -912,6 +1298,8 @@ function clearAll() {
   document.getElementById('segCount').textContent = '0 segments';
   document.getElementById('summaryStatus').textContent = '—';
   document.getElementById('rightFooter').classList.remove('visible');
+  document.getElementById('reviewStrip').classList.remove('visible');
+  reviewSaved = false;
   setStatus('', 'IDLE');
   setButtons(false, true, true);
   document.getElementById('pauseBtn').textContent = '⏸ Pause';
@@ -966,16 +1354,16 @@ async function pollForResult() {
     }
     if (data.status === 'done') {
       state = 'done';
-      setStatus('saving', 'SAVING…');
       summaryRaw     = data.summary || '';
       lastTranscript = data.transcript || '';
       renderSummary(summaryRaw);
       if (segments.length === 0 && data.transcript) renderServerTranscript(data.transcript);
-      const notionOk = await saveToNotion();
-      setStatus('done', 'DONE');
+      // Review step: show summary + editable Project/Context + Save button.
+      // User reviews, optionally edits, then clicks Save to push to Notion.
+      setStatus('done', 'READY TO SAVE');
+      showReviewStrip();
       document.getElementById('rightFooter').classList.add('visible');
-      document.getElementById('notionRetryBtn').style.display = notionOk ? 'none' : 'block';
-      toast(notionOk ? 'Saved to Notion ✓' : 'Done — Notion save failed');
+      toast('Review and save when ready');
     } else if (data.status === 'error') {
       setStatus('', 'ERROR');
       document.getElementById('summaryScroll').innerHTML = `
