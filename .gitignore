@@ -6,3 +6,4 @@ calendar_token.json
 node_modules/
 .env
 .env.local
+credentials.json
