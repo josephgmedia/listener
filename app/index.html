@@ -764,6 +764,8 @@ textarea::placeholder { color: var(--muted); }
         <div style="font-family:'Barlow',sans-serif;font-size:10px;color:var(--muted);margin-top:8px;letter-spacing:1px">
           Stored locally on this device only
         </div>
+        <button class="small-btn" style="margin-top:10px" onclick="testNotion()">Test Notion connection</button>
+        <div id="notionTestResult" style="font-family:'Barlow',sans-serif;font-size:11px;color:var(--muted);margin-top:8px;letter-spacing:1px;white-space:pre-wrap"></div>
       </div>
 
       <div class="field">
@@ -1353,6 +1355,62 @@ function addSegment(text) {
 }
 
 // ── Notion helpers ────────────────────────────────────────
+// Test the Notion token + DB access. Surfaces the actual API error to the
+// Setup tab so we know whether it's the token, the DB ID, missing share, etc.
+async function testNotion() {
+  const out = document.getElementById('notionTestResult');
+  out.textContent = 'testing…';
+  const token = getKey('notion');
+  if (!token) {
+    out.textContent = 'No token saved on this device. Paste it above.';
+    return;
+  }
+  if (!/^ntn_|^secret_/.test(token.trim())) {
+    out.textContent = 'Token format looks wrong. Notion tokens start with "ntn_" or "secret_".';
+    return;
+  }
+  // Step 1: can we authenticate at all?
+  let me;
+  try {
+    const r = await fetch('https://api.notion.com/v1/users/me', {
+      headers: {
+        'Authorization': 'Bearer ' + token.trim(),
+        'Notion-Version': NOTION_VERSION
+      }
+    });
+    me = await r.json();
+    if (!r.ok) {
+      out.textContent = 'AUTH FAILED (' + r.status + '): ' + (me.message || JSON.stringify(me));
+      return;
+    }
+  } catch (e) {
+    out.textContent = 'NETWORK/CORS ERROR contacting Notion: ' + e.message
+      + '\n(If you opened this from Files or as a saved page, try opening it from a real https URL or via the Listener server at /mobile.)';
+    return;
+  }
+  // Step 2: can we reach the hardcoded database?
+  try {
+    const r = await fetch('https://api.notion.com/v1/databases/' + NOTION_DB_ID, {
+      headers: {
+        'Authorization': 'Bearer ' + token.trim(),
+        'Notion-Version': NOTION_VERSION
+      }
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      out.textContent = 'AUTH OK as "' + (me.name || me.bot?.owner?.user?.name || 'integration') + '"'
+        + '\nBUT database ' + NOTION_DB_ID + ' is unreachable (' + r.status + '): '
+        + (data.message || JSON.stringify(data))
+        + '\n→ Open the database in Notion, click "..." → Connections → add this integration.';
+      return;
+    }
+    const title = (data.title || []).map(t => t.plain_text).join('') || '(untitled)';
+    out.textContent = '✓ Token works.\n✓ Database "' + title + '" is shared with this integration.\nUploads should succeed.';
+  } catch (e) {
+    out.textContent = 'NETWORK/CORS ERROR fetching database: ' + e.message;
+  }
+}
+
 // Notion rich_text property: each element max 2000 chars, split long strings
 function richText(str) {
   const chunks = [];
@@ -1394,10 +1452,11 @@ async function saveTranscriptToNotion(project) {
     });
 
     const data = await res.json();
-    if (data.object === 'error') throw new Error(data.message);
+    if (!res.ok || data.object === 'error') throw new Error(`${res.status}: ${data.message || JSON.stringify(data)}`);
     notionPageId = data.id;
   } catch(e) {
     console.warn('Notion transcript save failed:', e.message);
+    toast('Notion transcript save failed: ' + e.message, 5000);
   }
 }
 
@@ -1411,6 +1470,7 @@ async function saveOutputToNotion(project) {
     .join('\n\n');
 
   try {
+    let res, data;
     if (notionPageId) {
       // Update the existing page created by saveTranscriptToNotion
       const props = {
@@ -1418,7 +1478,7 @@ async function saveOutputToNotion(project) {
         Output: { rich_text: richText(outputText) }
       };
       if (project) props.Project = { select: { name: project } };
-      await fetch('https://api.notion.com/v1/pages/' + notionPageId, {
+      res = await fetch('https://api.notion.com/v1/pages/' + notionPageId, {
         method: 'PATCH',
         headers: {
           'Authorization': 'Bearer ' + token,
@@ -1438,7 +1498,7 @@ async function saveOutputToNotion(project) {
         Output: { rich_text: richText(outputText) }
       };
       if (project) props.Project = { select: { name: project } };
-      await fetch('https://api.notion.com/v1/pages', {
+      res = await fetch('https://api.notion.com/v1/pages', {
         method: 'POST',
         headers: {
           'Authorization': 'Bearer ' + token,
@@ -1448,9 +1508,14 @@ async function saveOutputToNotion(project) {
         body: JSON.stringify({ parent: { database_id: NOTION_DB_ID }, properties: props })
       });
     }
+    data = await res.json().catch(() => ({}));
+    if (!res.ok || data.object === 'error') {
+      throw new Error(`${res.status}: ${data.message || JSON.stringify(data)}`);
+    }
     return true;
   } catch(e) {
     console.warn('Notion output save failed:', e.message);
+    toast('Notion save failed: ' + e.message, 5000);
     return false;
   }
 }

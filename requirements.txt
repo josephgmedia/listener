@@ -1,0 +1,16 @@
+# Listener — Python dependencies
+# Install with:  pip install -r requirements.txt
+# Or just run setup.bat from the listener folder.
+
+anthropic>=0.40.0
+openai-whisper>=20231117
+sounddevice>=0.4.6
+soundfile>=0.12.1
+numpy>=1.26,<2.3
+# torch: keep loose — pip will pick the wheel that matches your Python.
+# For NVIDIA GPUs you may want a CUDA build instead, e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2
+# pyaudiowpatch is Windows-only and provides WASAPI loopback for USB headsets
+# (Jabra, Bose, AirPods dongle, etc.) that sounddevice cannot capture.
+pyaudiowpatch>=0.2.12 ; sys_platform == "win32"
