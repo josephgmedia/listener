@@ -4,7 +4,10 @@ cd /d "%~dp0app"
 echo.
 echo  Starting Meeting Recorder...
 
-start "Listener Server" cmd /k "python listener_server.py"
+REM Prefer the venv created by Listener.exe, fall back to system Python.
+set "PY=python"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+start "Listener Server" cmd /k ""%PY%" listener_server.py"
 
 REM Wait for the server to actually come up before opening the browser.
 REM Whisper/Torch imports can take 5-15s, so a fixed timeout caused 404s.

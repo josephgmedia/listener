@@ -1,9 +1,9 @@
 # Listener — Python dependencies
-# Install with:  pip install -r requirements.txt
-# Or just run setup.bat from the listener folder.
+# Installed automatically by Listener.exe on first run, or manually with:
+#   pip install -r requirements.txt
 
 anthropic>=0.40.0
-openai-whisper>=20231117
+whisperx>=3.1.5
 sounddevice>=0.4.6
 soundfile>=0.12.1
 numpy>=1.26,<2.3
@@ -11,6 +11,14 @@ numpy>=1.26,<2.3
 # For NVIDIA GPUs you may want a CUDA build instead, e.g.:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 torch>=2.2
+# Bundled ffmpeg binary so system PATH doesn't matter
+imageio-ffmpeg>=0.4.9
 # pyaudiowpatch is Windows-only and provides WASAPI loopback for USB headsets
 # (Jabra, Bose, AirPods dongle, etc.) that sounddevice cannot capture.
 pyaudiowpatch>=0.2.12 ; sys_platform == "win32"
+
+# ── Calendar watcher (optional) ──────────────────────────────
+google-auth>=2.0
+google-auth-oauthlib>=1.0
+google-api-python-client>=2.0
+winotify>=1.1 ; sys_platform == "win32"

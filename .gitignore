@@ -12,3 +12,11 @@ __pycache__/
 *.pyc
 calendar_notified.json
 recordings/
+
+.venv/
+Listener.exe
+build/
+*.spec
+calendar/calendar_token*.json
+calendar/credentials.json
+calendar/calendar_notified.json
