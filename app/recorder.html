@@ -247,6 +247,75 @@ header {
   color: var(--muted2);
   line-height: 1.4;
 }
+.device-entry + .device-entry { margin-top: 12px; }
+.device-select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 6px 8px;
+  font-family: 'Barlow', sans-serif;
+  font-size: 11px;
+  font-weight: 300;
+  border-radius: var(--radius);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+.device-select:focus { border-color: var(--highlight); }
+.device-select option { background: var(--surface); color: var(--text); }
+.device-test {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.test-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--muted2);
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.test-btn:hover:not(:disabled) { border-color: var(--highlight); color: var(--highlight); }
+.test-btn:disabled { opacity: 0.4; cursor: default; }
+.test-btn.testing { border-color: var(--accent); color: var(--accent); }
+.level-meter {
+  flex: 1;
+  height: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.level-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--muted);
+  border-radius: 3px;
+  transition: width 0.08s ease-out, background 0.2s ease;
+}
+.level-fill.ok  { background: var(--highlight); }
+.level-fill.hot { background: var(--red); }
+.test-result {
+  font-family: 'Barlow', sans-serif;
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-top: 4px;
+  min-height: 11px;
+}
+.test-result.ok   { color: var(--highlight); }
+.test-result.fail { color: var(--red); }
 
 /* ── CONTROLS ─────────────────────────────────── */
 .controls {
@@ -709,12 +778,22 @@ header {
       <div class="label">Capture device</div>
       <div class="device-row">
         <div class="device-entry">
-          <div class="device-type">Loopback</div>
-          <div class="device-name-text" id="loopbackName">Detecting...</div>
+          <div class="device-type">Loopback (system audio)</div>
+          <select class="device-select" id="loopbackSelect" onchange="onDeviceChange('loopback')" aria-label="Loopback device"></select>
+          <div class="device-test">
+            <button class="test-btn" id="testLoopbackBtn" onclick="testDevice('loopback')">Test</button>
+            <div class="level-meter"><div class="level-fill" id="loopbackLevel"></div></div>
+          </div>
+          <div class="test-result" id="loopbackResult"></div>
         </div>
         <div class="device-entry">
           <div class="device-type">Mic</div>
-          <div class="device-name-text" id="micName">Detecting...</div>
+          <select class="device-select" id="micSelect" onchange="onDeviceChange('mic')" aria-label="Mic device"></select>
+          <div class="device-test">
+            <button class="test-btn" id="testMicBtn" onclick="testDevice('mic')">Test</button>
+            <div class="level-meter"><div class="level-fill" id="micLevel"></div></div>
+          </div>
+          <div class="test-result" id="micResult"></div>
         </div>
       </div>
     </div>
@@ -1136,9 +1215,11 @@ async function checkServer() {
     document.getElementById('serverDown').classList.remove('visible');
     document.getElementById('serverPill').textContent = 'Server: connected';
     document.getElementById('serverPill').classList.add('connected');
-    document.getElementById('loopbackName').textContent = data.loopback_device || 'Not found';
-    document.getElementById('micName').textContent = data.mic_device || 'Not found';
-    // First successful server connect → check calendar for an active meeting
+    // First successful server connect → populate device pickers + check calendar
+    if (!devicesLoaded) {
+      devicesLoaded = true;
+      loadDevices(data);
+    }
     if (!calendarCheckedOnce) {
       calendarCheckedOnce = true;
       loadCalendarMeeting();
@@ -1160,6 +1241,106 @@ async function refreshStatus() {
     serverOk = true;
     setTimeout(refreshStatus, 5000);
   } catch(e) { serverOk = false; }
+}
+
+// ── Device selection + signal test ─────────────
+let devicesLoaded = false;
+
+async function loadDevices(status) {
+  try {
+    const devices = await (await fetch(`${API}/devices`)).json();
+    const loopSel = document.getElementById('loopbackSelect');
+    const micSel  = document.getElementById('micSelect');
+
+    // Loopback picker: input-capable devices + output devices (WASAPI loopback).
+    // Mic picker: input-capable devices only.
+    const optAuto = sel => {
+      const o = document.createElement('option');
+      o.value = 'auto'; o.textContent = 'Auto-detect'; sel.appendChild(o);
+    };
+    loopSel.innerHTML = ''; micSel.innerHTML = '';
+    optAuto(loopSel); optAuto(micSel);
+
+    devices.forEach(d => {
+      const label = `${d.name}  ·  ${d.api}`;
+      if (d.in > 0 || d.out > 0) {
+        const o = document.createElement('option');
+        o.value = d.id; o.textContent = label; loopSel.appendChild(o);
+      }
+      if (d.in > 0) {
+        const o = document.createElement('option');
+        o.value = d.id; o.textContent = label; micSel.appendChild(o);
+      }
+    });
+
+    // Reflect current selection: manual override wins, else "Auto-detect".
+    loopSel.value = (status && status.manual_loopback_id != null) ? String(status.manual_loopback_id) : 'auto';
+    micSel.value  = (status && status.manual_mic_id      != null) ? String(status.manual_mic_id)      : 'auto';
+    if (!loopSel.value) loopSel.value = 'auto';
+    if (!micSel.value)  micSel.value  = 'auto';
+  } catch (e) {
+    console.warn('loadDevices failed:', e.message);
+  }
+}
+
+async function onDeviceChange(kind) {
+  const sel = document.getElementById(kind === 'loopback' ? 'loopbackSelect' : 'micSelect');
+  const body = kind === 'loopback' ? { loopback_id: sel.value } : { mic_id: sel.value };
+  try {
+    await fetch(`${API}/set-devices`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    // Clear any stale test result for this device
+    setTestResult(kind, '', '');
+    document.getElementById(kind === 'loopback' ? 'loopbackLevel' : 'micLevel').style.width = '0%';
+  } catch (e) {
+    toast('Could not set device');
+  }
+}
+
+function setTestResult(kind, text, cls) {
+  const el = document.getElementById(kind === 'loopback' ? 'loopbackResult' : 'micResult');
+  el.textContent = text;
+  el.className = 'test-result' + (cls ? ' ' + cls : '');
+}
+
+async function testDevice(kind) {
+  const btn   = document.getElementById(kind === 'loopback' ? 'testLoopbackBtn' : 'testMicBtn');
+  const fill  = document.getElementById(kind === 'loopback' ? 'loopbackLevel' : 'micLevel');
+  if (state === 'recording') { toast('Stop recording to test'); return; }
+
+  btn.disabled = true; btn.classList.add('testing');
+  btn.textContent = '···';
+  setTestResult(kind, kind === 'loopback' ? 'Play some audio…' : 'Say something…', '');
+  fill.className = 'level-fill';
+
+  try {
+    const res  = await fetch(`${API}/test-signal`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      setTestResult(kind, data.error || 'Test failed', 'fail');
+      fill.style.width = '0%';
+    } else {
+      // Map peak (0..~0.5+) to a 0-100% bar with some gain so quiet speech shows.
+      const pct = Math.min(100, Math.round(data.peak * 260));
+      fill.style.width = pct + '%';
+      fill.className = 'level-fill' + (data.peak > 0.4 ? ' hot' : data.signal ? ' ok' : '');
+      if (data.signal) {
+        setTestResult(kind, `Signal OK · peak ${data.peak}`, 'ok');
+      } else {
+        setTestResult(kind, `No signal · peak ${data.peak}`, 'fail');
+      }
+    }
+  } catch (e) {
+    setTestResult(kind, 'Test failed', 'fail');
+  } finally {
+    btn.disabled = false; btn.classList.remove('testing');
+    btn.textContent = 'Test';
+  }
 }
 
 // ── Controls ───────────────────────────────────

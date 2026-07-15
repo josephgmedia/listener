@@ -15,6 +15,7 @@ recordings/
 
 .venv/
 Listener.exe
+listener.log
 build/
 *.spec
 calendar/calendar_token*.json

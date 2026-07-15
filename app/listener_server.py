@@ -27,7 +27,7 @@ import io
 import torch
 from datetime import datetime
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
 # ── FFmpeg: use bundled binary from imageio-ffmpeg so system PATH doesn't matter ─
@@ -75,6 +75,11 @@ transcription_ready   = threading.Event()
 loopback_rate_saved   = 48000
 mic_rate_saved        = 48000
 _device_cache         = None   # cache (loopback_id, loopback_name, mic_id, mic_name)
+manual_loopback_id    = None   # None = auto-detect; int = force this sounddevice index
+manual_mic_id         = None   # None = auto-detect; int = force this sounddevice index
+recording_session_ts  = None   # timestamp string for the current recording's live-flush files
+_flush_stop           = threading.Event()
+_flush_thread         = None
 
 # ── Device detection ──────────────────────────────────────────────────────────
 def _can_open_as_input(device_id, channels, samplerate):
@@ -255,6 +260,179 @@ def get_all_devices():
             "out": d['max_output_channels']
         })
     return result
+
+
+# ── Device resolution (honours manual overrides from the UI) ──────────────────
+# resolve_loopback()/resolve_mic() are the single source of truth for WHICH
+# device gets captured. Both /start and the signal-test endpoints call them, so a
+# "Test" always exercises exactly what a real recording would use.
+
+def resolve_loopback():
+    """How the system-audio loopback will be captured.
+    Returns {method: 'pyaudio'|'sounddevice'|None, id, name, rate}."""
+    if manual_loopback_id is not None:
+        devices = sd.query_devices()
+        name = (devices[manual_loopback_id]['name']
+                if 0 <= manual_loopback_id < len(devices) else f"#{manual_loopback_id}")
+        return {"method": "sounddevice", "id": manual_loopback_id, "name": name,
+                "rate": get_device_sample_rate(manual_loopback_id)}
+    # Auto: prefer pyaudiowpatch WASAPI loopback (captures USB headsets)
+    if HAVE_PYAUDIO:
+        pa_id, pa_name, pa_rate = detect_pyaudio_loopback()
+        if pa_id is not None:
+            return {"method": "pyaudio", "id": pa_id, "name": pa_name, "rate": pa_rate}
+    l_id, l_name = get_loopback_device(refresh=True)
+    if l_id is not None:
+        return {"method": "sounddevice", "id": l_id, "name": l_name,
+                "rate": get_device_sample_rate(l_id)}
+    return {"method": None, "id": None, "name": None, "rate": SAMPLE_RATE}
+
+
+def resolve_mic():
+    """How the mic will be captured. Returns {id, name, rate}."""
+    if manual_mic_id is not None:
+        devices = sd.query_devices()
+        name = (devices[manual_mic_id]['name']
+                if 0 <= manual_mic_id < len(devices) else f"#{manual_mic_id}")
+        return {"id": manual_mic_id, "name": name, "rate": get_device_sample_rate(manual_mic_id)}
+    m_id, m_name = get_mic_device()
+    return {"id": m_id, "name": m_name,
+            "rate": get_device_sample_rate(m_id) if m_id is not None else SAMPLE_RATE}
+
+
+# ── Signal test ───────────────────────────────────────────────────────────────
+def _level(captured):
+    """Peak/RMS of captured chunks. 'signal' True if clearly above the noise floor."""
+    if not captured:
+        return {"ok": True, "peak": 0.0, "rms": 0.0, "signal": False}
+    data = np.concatenate(captured, axis=0)
+    if data.ndim == 2:
+        data = data.mean(axis=1)
+    peak = float(np.max(np.abs(data)))
+    rms  = float(np.sqrt(np.mean(data ** 2)))
+    return {"ok": True, "peak": round(peak, 4), "rms": round(rms, 5), "signal": peak > 0.005}
+
+
+def _measure_sd(device_id, seconds=1.5):
+    """Capture briefly from a sounddevice input (mic, Stereo Mix, VB-Cable) and
+    report level."""
+    captured = []
+    devices = sd.query_devices()
+    if not (0 <= device_id < len(devices)):
+        return {"ok": False, "error": f"Device #{device_id} out of range"}
+    d = devices[device_id]
+    channels = max(1, int(d['max_input_channels'] or d['max_output_channels'] or 1))
+    rate = get_device_sample_rate(device_id)
+    try:
+        with sd.InputStream(samplerate=rate, channels=channels, dtype='float32',
+                            device=device_id,
+                            callback=lambda indata, frames, t, s: captured.append(indata.copy())):
+            sd.sleep(int(seconds * 1000))
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return _level(captured)
+
+
+def _measure_pyaudio(device_id, rate, seconds=1.5):
+    """Capture briefly from a pyaudiowpatch WASAPI loopback device and report level."""
+    captured = []
+    try:
+        p = pyaudio.PyAudio()
+        d = p.get_device_info_by_index(device_id)
+        channels = max(1, int(d["maxInputChannels"]))
+        stream = p.open(format=pyaudio.paFloat32, channels=channels, rate=int(rate),
+                        input=True, input_device_index=device_id, frames_per_buffer=1024)
+        need = int(rate * seconds)
+        got = 0
+        while got < need:
+            buf = stream.read(1024, exception_on_overflow=False)
+            captured.append(np.frombuffer(buf, dtype=np.float32).reshape(-1, channels))
+            got += 1024
+        stream.stop_stream(); stream.close(); p.terminate()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return _level(captured)
+
+
+def test_signal(kind):
+    """Run a ~1.5s capture on the loopback or mic exactly as /start would, so the
+    user can confirm signal before a real meeting. Returns level + device name."""
+    if current_status == "recording":
+        return {"ok": False, "error": "Stop the recording before testing devices"}
+    if kind == "loopback":
+        plan = resolve_loopback()
+        if plan["id"] is None:
+            return {"ok": False, "error": "No loopback device found", "device": None}
+        res = (_measure_pyaudio(plan["id"], plan["rate"]) if plan["method"] == "pyaudio"
+               else _measure_sd(plan["id"]))
+        res["device"] = plan["name"]
+        return res
+    else:
+        plan = resolve_mic()
+        if plan["id"] is None:
+            return {"ok": False, "error": "No mic device found", "device": None}
+        res = _measure_sd(plan["id"])
+        res["device"] = plan["name"]
+        return res
+
+
+# ── Crash-safe live flush ─────────────────────────────────────────────────────
+# During recording audio lives only in RAM (loopback_chunks/mic_chunks) and is
+# written on Stop. If the app or PC dies mid-meeting that audio is lost. This
+# background thread appends new audio to on-disk WAVs every few seconds, so a
+# crash costs at most the last ~5s. On a clean Stop the completed recording is
+# saved from RAM as usual and these live files are deleted (see transcribe_recording).
+
+def _flush_worker(loopback_rate, mic_rate, session_ts):
+    loop_path = OUTPUT_DIR / f"audio_{session_ts}_live_loopback.wav"
+    mic_path  = OUTPUT_DIR / f"audio_{session_ts}_live_mic.wav"
+    loop_sf = mic_sf = None
+    loop_written = mic_written = 0
+
+    def _drain(chunks, written, handle, path, rate, channels_hint=1):
+        end = len(chunks)               # snapshot length first — list only ever grows
+        if end <= written:
+            return written, handle
+        block = chunks[written:end]
+        data = np.concatenate(block, axis=0)
+        if data.ndim == 2:
+            data = data.mean(axis=1)
+        if handle is None:
+            handle = sf.SoundFile(str(path), mode='w', samplerate=int(rate), channels=1)
+        handle.write(data)
+        handle.flush()
+        return end, handle
+
+    try:
+        while not _flush_stop.is_set():
+            _flush_stop.wait(5)
+            try:
+                loop_written, loop_sf = _drain(loopback_chunks, loop_written, loop_sf, loop_path, loopback_rate)
+                mic_written,  mic_sf  = _drain(mic_chunks,      mic_written,  mic_sf,  mic_path,  mic_rate)
+            except Exception as e:
+                print(f"  [flush] write error: {e}")
+        # Final drain after stop so the live file is complete right up to Stop
+        try:
+            _drain(loopback_chunks, loop_written, loop_sf, loop_path, loopback_rate)
+            _drain(mic_chunks,      mic_written,  mic_sf,  mic_path,  mic_rate)
+        except Exception:
+            pass
+    finally:
+        if loop_sf: loop_sf.close()
+        if mic_sf:  mic_sf.close()
+
+
+def _cleanup_live_files(session_ts):
+    """Remove the crash-recovery WAVs once the real recording has been saved."""
+    if not session_ts:
+        return
+    for suffix in ("live_loopback", "live_mic"):
+        p = OUTPUT_DIR / f"audio_{session_ts}_{suffix}.wav"
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
 
 
 # ── Calendar (Granola-style meeting awareness) ────────────────────────────────
@@ -870,6 +1048,9 @@ def transcribe_recording(loopback_rate, mic_rate):
     size_mb = audio_path.stat().st_size / (1024 * 1024)
     print(f"Audio saved: {audio_path} ({duration:.1f}s, {size_mb:.1f}MB)")
 
+    # Real recording is now safely on disk — drop the crash-recovery live files.
+    _cleanup_live_files(recording_session_ts)
+
     # Bail out early if BOTH streams were essentially silent — Whisper would
     # otherwise hallucinate "Thank you." or similar from pure silence.
     SILENCE_PEAK = 0.005
@@ -1081,14 +1262,27 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/status":
+            # Kept cheap (polled every 5s): use the cached auto-detected names, or
+            # the manually-selected device name if the user overrode it.
             loopback_id, loopback_name = get_loopback_device()
             mic_id, mic_name = get_mic_device()
+            all_devs = None
+            if manual_loopback_id is not None or manual_mic_id is not None:
+                all_devs = sd.query_devices()
+            if manual_loopback_id is not None and 0 <= manual_loopback_id < len(all_devs):
+                loopback_name = all_devs[manual_loopback_id]['name']
+                loopback_id   = manual_loopback_id
+            if manual_mic_id is not None and 0 <= manual_mic_id < len(all_devs):
+                mic_name = all_devs[manual_mic_id]['name']
+                mic_id   = manual_mic_id
             self.send_json({
                 "status": current_status,
                 "loopback_device": loopback_name or "Not found",
                 "loopback_device_id": loopback_id,
                 "mic_device": mic_name or "Not found",
                 "mic_device_id": mic_id,
+                "manual_loopback_id": manual_loopback_id,
+                "manual_mic_id": manual_mic_id,
                 "loopback_chunks": len(loopback_chunks),
                 "mic_chunks": len(mic_chunks),
                 "summary": last_summary,
@@ -1222,37 +1416,63 @@ class Handler(BaseHTTPRequestHandler):
 
         body = json.loads(self.rfile.read(length)) if length else {}
 
+        if path == "/set-devices":
+            # Override auto-detection. Pass an int device id, or null/"auto" to
+            # revert that device to automatic detection.
+            global manual_loopback_id, manual_mic_id
+            if current_status == "recording":
+                self.send_json({"error": "Stop recording before changing devices"}); return
+
+            def _norm(v):
+                if v is None or v == "auto" or v == "":
+                    return None
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return None
+
+            if "loopback_id" in body:
+                manual_loopback_id = _norm(body.get("loopback_id"))
+            if "mic_id" in body:
+                manual_mic_id = _norm(body.get("mic_id"))
+            get_devices(refresh=True)  # refresh auto-detect cache for /status
+            self.send_json({"ok": True,
+                            "manual_loopback_id": manual_loopback_id,
+                            "manual_mic_id": manual_mic_id})
+            return
+
+        if path == "/test-signal":
+            # Capture ~1.5s from the loopback or mic (exactly as /start would) and
+            # report the level so the user can confirm signal before a meeting.
+            kind = body.get("kind", "mic")
+            self.send_json(test_signal("loopback" if kind == "loopback" else "mic"))
+            return
+
         if path == "/start":
+            global recording_session_ts, _flush_thread
             if current_status == "recording":
                 self.send_json({"error": "Already recording"})
                 return
 
-            # Priority 1: pyaudiowpatch WASAPI loopback (works for USB audio like Jabra)
-            # Priority 2: sounddevice fallback (Stereo Mix, VB-Cable, integrated audio)
-            use_pyaudio_loopback = False
-            pa_loopback_id = None
+            # Resolve devices (honours manual overrides picked in the UI, else
+            # auto-detects: pyaudiowpatch WASAPI loopback first, then sounddevice).
+            loop_plan = resolve_loopback()
+            mic_plan  = resolve_mic()
 
-            if HAVE_PYAUDIO:
-                pa_loopback_id, pa_loopback_name, pa_loopback_rate = detect_pyaudio_loopback()
-                if pa_loopback_id is not None:
-                    use_pyaudio_loopback = True
-                    loopback_name = pa_loopback_name
-                    loopback_rate = pa_loopback_rate
+            loopback_id   = loop_plan["id"]
+            loopback_name = loop_plan["name"]
+            loopback_rate = loop_plan["rate"]
+            use_pyaudio_loopback = (loop_plan["method"] == "pyaudio")
 
-            if not use_pyaudio_loopback:
-                loopback_id, loopback_name = get_loopback_device(refresh=True)
-                loopback_rate = get_device_sample_rate(loopback_id) if loopback_id is not None else SAMPLE_RATE
-            else:
-                get_loopback_device(refresh=True)  # refresh cache for /status display
-                loopback_id = pa_loopback_id
+            mic_id   = mic_plan["id"]
+            mic_name = mic_plan["name"]
+            mic_rate = mic_plan["rate"]
 
-            mic_id, mic_name = get_mic_device()
+            get_loopback_device(refresh=True)  # refresh cache for /status display
 
             if loopback_id is None and mic_id is None:
                 self.send_json({"error": "No audio devices found"})
                 return
-
-            mic_rate = get_device_sample_rate(mic_id) if mic_id is not None else SAMPLE_RATE
 
             # Save rates for use by /stop later
             loopback_rate_saved = loopback_rate
@@ -1268,6 +1488,7 @@ class Handler(BaseHTTPRequestHandler):
             stop_event.clear()
             recording = True
             current_status = "recording"
+            recording_session_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
             print(f"Starting recording:")
             if loopback_id is not None:
@@ -1294,6 +1515,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 print("  No mic device found")
 
+            # Crash-safe: flush captured audio to disk every few seconds
+            _flush_stop.clear()
+            _flush_thread = threading.Thread(
+                target=_flush_worker,
+                args=(loopback_rate, mic_rate, recording_session_ts),
+                daemon=True
+            )
+            _flush_thread.start()
+
             self.send_json({
                 "ok": True,
                 "status": "recording",
@@ -1316,6 +1546,7 @@ class Handler(BaseHTTPRequestHandler):
             # Format choice comes later via /format.
             recording = False
             stop_event.set()
+            _flush_stop.set()          # stop crash-safe flusher (final drain happens inside)
             transcription_ready.clear()
             current_status = "transcribing"
 
@@ -1493,14 +1724,19 @@ def main():
     # almost immediately and the browser opens fast. All the banner/device/GPU
     # probing below is diagnostic only and must not sit on the critical path.
     import threading as _t
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    # Threaded so a 1.5s device signal-test can't block the status poll.
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     _t.Thread(target=server.serve_forever, daemon=True).start()
 
-    import webbrowser
-    def _open_browser():
-        import time; time.sleep(0.3)
-        webbrowser.open(f"http://localhost:{PORT}/desktop")
-    _t.Thread(target=_open_browser, daemon=True).start()
+    # Open the browser ourselves when run directly (launch.bat / python).
+    # The .exe launcher opens it instead and sets LISTENER_NO_BROWSER to avoid
+    # a duplicate tab.
+    if not os.environ.get("LISTENER_NO_BROWSER"):
+        import webbrowser
+        def _open_browser():
+            import time; time.sleep(0.3)
+            webbrowser.open(f"http://localhost:{PORT}/desktop")
+        _t.Thread(target=_open_browser, daemon=True).start()
 
     print("\n" + "=" * 55)
     print("  MEETING RECORDER — Server")
