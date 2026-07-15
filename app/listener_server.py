@@ -14,12 +14,14 @@ logging.getLogger("lightning_fabric").setLevel(logging.ERROR)
 logging.getLogger("pyannote").setLevel(logging.ERROR)
 
 import anthropic
-import whisperx
+# NOTE: whisperx is imported lazily inside the transcription functions, not here.
+# It drags in torch/faster-whisper/pyannote/lightning/transformers — a ~10-30s
+# cold import that used to block server startup (and the browser) for no reason,
+# since it's only needed the moment you stop a recording. See transcribe_*().
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
 import threading
-import socket
 import json
 import io
 import torch
@@ -64,6 +66,7 @@ stop_event            = threading.Event()
 rec_thread_loopback   = None
 rec_thread_mic        = None
 whisper_model         = None   # whisperx model, loaded once and reused
+align_model_cache     = None   # (model_a, metadata) for "en", loaded once and reused
 current_status        = "idle"
 last_summary          = ""
 last_transcript       = ""
@@ -802,6 +805,18 @@ def fmt_time(seconds):
     return f"{m:02d}:{s:02d}"
 
 
+def get_align_model():
+    """Load the English wav2vec2 alignment model once and reuse it.
+
+    Previously this was reloaded on every transcription, adding needless latency
+    to each recording. Cached here since the language is always 'en'."""
+    global align_model_cache
+    if align_model_cache is None:
+        import whisperx
+        align_model_cache = whisperx.load_align_model(language_code="en", device=DEVICE)
+    return align_model_cache
+
+
 def transcribe_recording(loopback_rate, mic_rate):
     global current_status, last_transcript, whisper_model
 
@@ -877,14 +892,15 @@ def transcribe_recording(loopback_rate, mic_rate):
     print(f"Transcribing with whisperx {WHISPER_MODEL} on {gpu_name}...")
 
     try:
+        import whisperx  # lazy — see import note at top of file
         if whisper_model is None:
             whisper_model = whisperx.load_model(WHISPER_MODEL, DEVICE, compute_type=COMPUTE_TYPE)
 
         audio = load_audio_file(audio_path)
         result = whisper_model.transcribe(audio, batch_size=16 if DEVICE == "cuda" else 4, language="en")
 
-        # Align for accurate word timestamps
-        model_a, metadata = whisperx.load_align_model(language_code="en", device=DEVICE)
+        # Align for accurate word timestamps (align model cached across recordings)
+        model_a, metadata = get_align_model()
         result = whisperx.align(result["segments"], model_a, metadata, audio, device=DEVICE,
                                 return_char_alignments=False)
 
@@ -1163,6 +1179,7 @@ class Handler(BaseHTTPRequestHandler):
             def transcribe_uploaded():
                 global current_status, last_transcript, whisper_model
                 try:
+                    import whisperx  # lazy — see import note at top of file
                     if whisper_model is None:
                         print("  Loading whisperx model...")
                         whisper_model = whisperx.load_model(WHISPER_MODEL, DEVICE, compute_type=COMPUTE_TYPE)
@@ -1171,7 +1188,7 @@ class Handler(BaseHTTPRequestHandler):
                     print("  Transcribing... (this takes a few minutes on GPU)")
                     result   = whisper_model.transcribe(audio, batch_size=16 if DEVICE == "cuda" else 4, language="en")
                     print("  Aligning timestamps...")
-                    model_a, metadata = whisperx.load_align_model(language_code="en", device=DEVICE)
+                    model_a, metadata = get_align_model()
                     result   = whisperx.align(result["segments"], model_a, metadata, audio, device=DEVICE,
                                               return_char_alignments=False)
                     if HF_TOKEN:
@@ -1452,12 +1469,47 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"error": "Not found"}, 404)
 
 
+def _local_ip():
+    """Best-effort LAN IP for the phone URL. Never blocks startup: a bad network
+    or slow reverse-DNS used to hang gethostbyname() for seconds right before the
+    server started serving."""
+    import socket as _s
+    try:
+        # Doesn't actually send packets; just asks the OS which local interface
+        # would route to an external address. Fast and doesn't hit DNS.
+        s = _s.socket(_s.AF_INET, _s.SOCK_DGRAM)
+        try:
+            s.settimeout(0.2)
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return "localhost"
+
+
 def main():
+    # Bind and start serving FIRST, in a background thread, so /status answers
+    # almost immediately and the browser opens fast. All the banner/device/GPU
+    # probing below is diagnostic only and must not sit on the critical path.
+    import threading as _t
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    _t.Thread(target=server.serve_forever, daemon=True).start()
+
+    import webbrowser
+    def _open_browser():
+        import time; time.sleep(0.3)
+        webbrowser.open(f"http://localhost:{PORT}/desktop")
+    _t.Thread(target=_open_browser, daemon=True).start()
+
     print("\n" + "=" * 55)
     print("  MEETING RECORDER — Server")
     print("=" * 55)
+    print(f"  Desktop  : http://localhost:{PORT}/desktop")
+    print(f"  Phone    : http://{_local_ip()}:{PORT}/mobile")
+    print(f"  Ctrl+C to stop\n")
 
-    # Show pyaudiowpatch loopback in banner if available (preferred for USB audio)
+    # Device + GPU detection (runs after the server is already up)
     if HAVE_PYAUDIO:
         pa_id, pa_name, pa_rate = detect_pyaudio_loopback()
         if pa_id is not None:
@@ -1471,25 +1523,15 @@ def main():
 
     _, _, mic_id, mic_name = get_devices()
     print(f"  Mic      : {mic_name or 'Not found'}" + (f" (#{mic_id})" if mic_id is not None else ""))
-    local_ip = socket.gethostbyname(socket.gethostname())
     print(f"  GPU      : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None — using CPU'}")
-    print(f"  Desktop  : http://localhost:{PORT}/desktop")
-    print(f"  Phone    : http://{local_ip}:{PORT}/mobile")
-    print(f"  Ctrl+C to stop\n")
-
-    server = HTTPServer(("0.0.0.0", PORT), Handler)
-
-    # Open browser once server is confirmed ready
-    import webbrowser, threading as _t
-    def _open_browser():
-        import time; time.sleep(0.5)
-        webbrowser.open(f"http://localhost:{PORT}/desktop")
-    _t.Thread(target=_open_browser, daemon=True).start()
+    print()
 
     try:
-        server.serve_forever()
+        while True:
+            import time; time.sleep(1)
     except KeyboardInterrupt:
         print("\n  Server stopped.")
+        server.shutdown()
 
 
 if __name__ == "__main__":

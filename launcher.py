@@ -95,6 +95,19 @@ def ensure_venv():
     r = subprocess.run([
         str(VENV_PY), "-m", "pip", "install", "--upgrade", "pip", "-q",
     ])
+
+    # On an NVIDIA machine, install a CUDA torch build FIRST. Plain
+    # `pip install torch` from PyPI gives a CPU-only wheel by default, which makes
+    # Whisper transcription painfully slow even on a 4090. Installing the CUDA
+    # wheel first means the later `-r requirements.txt` (torch>=2.2) is already
+    # satisfied and won't replace it.
+    if shutil.which("nvidia-smi"):
+        say("NVIDIA GPU detected — installing CUDA build of torch...")
+        subprocess.run([
+            str(VENV_PY), "-m", "pip", "install", "torch",
+            "--index-url", "https://download.pytorch.org/whl/cu124",
+        ])
+
     r = subprocess.run([
         str(VENV_PY), "-m", "pip", "install", "-r", str(REQUIREMENTS),
     ])
