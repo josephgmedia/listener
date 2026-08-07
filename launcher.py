@@ -27,9 +27,26 @@ PORT = 8765
 CREATE_NO_WINDOW   = 0x08000000   # server runs with no console window
 CREATE_NEW_CONSOLE = 0x00000010
 
-# When frozen by PyInstaller the app root is the folder containing the exe.
 FROZEN = getattr(sys, "frozen", False)
-ROOT = Path(sys.executable).parent if FROZEN else Path(__file__).parent
+
+
+def _find_root():
+    """The project folder — the one holding app/, requirements.txt and .venv/.
+
+    --onefile put Listener.exe straight into the project folder, so the root was
+    simply the exe's directory. --onedir (much faster: no 23MB unpack on every
+    launch) puts the exe in a Listener/ subfolder next to its _internal/, one
+    level down. Walk up a couple of levels until app/listener_server.py appears
+    so either layout keeps working.
+    """
+    start = Path(sys.executable).parent if FROZEN else Path(__file__).parent
+    for cand in (start, start.parent, start.parent.parent):
+        if (cand / "app" / "listener_server.py").exists():
+            return cand
+    return start
+
+
+ROOT = _find_root()
 
 VENV_DIR     = ROOT / ".venv"
 VENV_PY      = VENV_DIR / "Scripts" / "python.exe"
@@ -287,7 +304,9 @@ def main():
     proc = start_server_hidden()
 
     # Wait for the server to accept connections, then open the browser.
-    for _ in range(180):
+    # Polled 4x/second, not once: the server binds in ~2s, so a 1s sleep spent up
+    # to a second of dead time after it was already ready. Same 180s ceiling.
+    for _ in range(720):
         if server_running():
             open_ui()
             break
@@ -296,7 +315,7 @@ def main():
                     "The log will open so you can see what happened.")
             open_log()
             return
-        time.sleep(1)
+        time.sleep(0.25)
 
     run_tray(proc)
 
