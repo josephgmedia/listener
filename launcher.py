@@ -200,8 +200,13 @@ def start_server_hidden():
     logf = open(LOG, "w", buffering=1)
     env = dict(os.environ)
     env["LISTENER_NO_BROWSER"] = "1"   # we open the browser; avoid a duplicate tab
+    # -u / PYTHONUNBUFFERED: with stdout redirected to a file Python switches to
+    # block buffering, so the last few KB of output — which is exactly where a
+    # crash traceback lives — never reaches listener.log. Unbuffered means the
+    # log always tells you why something failed.
+    env["PYTHONUNBUFFERED"] = "1"
     return subprocess.Popen(
-        [str(VENV_PY), str(SERVER)],
+        [str(VENV_PY), "-u", str(SERVER)],
         cwd=str(SERVER.parent),
         stdout=logf, stderr=subprocess.STDOUT,
         creationflags=CREATE_NO_WINDOW,

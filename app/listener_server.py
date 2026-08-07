@@ -24,7 +24,9 @@ import numpy as np
 import threading
 import json
 import io
-import torch
+# NOTE: torch is NOT imported here — see device_info(). It costs ~1.5s to import
+# and is only needed once a transcription starts, so importing it at module scope
+# added that delay to every server startup (i.e. to how long the app takes to open).
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -54,9 +56,26 @@ SAMPLE_RATE     = 48000
 OUTPUT_DIR      = Path("recordings")
 OUTPUT_DIR.mkdir(exist_ok=True)
 PORT            = 8765
-DEVICE          = "cuda" if torch.cuda.is_available() else "cpu"
-COMPUTE_TYPE    = "float16" if torch.cuda.is_available() else "int8"
 HF_TOKEN        = os.environ.get("HF_TOKEN", "")  # set HF_TOKEN env var for speaker diarization
+
+_device_info = None
+
+def device_info():
+    """Return (device, compute_type, gpu_name), importing torch on first use.
+
+    Cached, so the ~1.5s torch import happens once — and never before the HTTP
+    server is already accepting connections. gpu_name is None on CPU.
+    """
+    global _device_info
+    if _device_info is None:
+        import torch
+        cuda = torch.cuda.is_available()
+        _device_info = (
+            "cuda"    if cuda else "cpu",
+            "float16" if cuda else "int8",
+            torch.cuda.get_device_name(0) if cuda else None,
+        )
+    return _device_info
 
 # ── State ─────────────────────────────────────────────────────────────────────
 recording             = False
@@ -991,8 +1010,49 @@ def get_align_model():
     global align_model_cache
     if align_model_cache is None:
         import whisperx
-        align_model_cache = whisperx.load_align_model(language_code="en", device=DEVICE)
+        align_model_cache = whisperx.load_align_model(language_code="en", device=device_info()[0])
     return align_model_cache
+
+
+def label_speakers_by_channel(segments, loop_data, loop_rate, mic_data, mic_rate):
+    """Label who spoke using the two capture channels: the mic stream is Joe,
+    the loopback stream is everyone else. For each transcript segment, whichever
+    stream is more active (relative to its own overall level) claims it.
+
+    Works without any HF token. When pyannote diarization has already assigned
+    SPEAKER_XX labels, mic-dominant segments are overridden to "Joe" while the
+    remote speakers keep their distinct labels; without diarization the remote
+    side is labelled "Them"."""
+    if loop_data is None or mic_data is None or not len(loop_data) or not len(mic_data):
+        return
+    SILENCE_RMS = 0.002   # below this a stream isn't speaking at all
+    DOMINANCE   = 1.5     # how much more active a stream must be to claim a segment
+
+    # Normalising by each stream's own average level cancels out gain differences
+    # between the mic preamp and the digital loopback tap.
+    loop_ref = max(float(np.sqrt(np.mean(loop_data ** 2))), 1e-6)
+    mic_ref  = max(float(np.sqrt(np.mean(mic_data ** 2))),  1e-6)
+
+    def seg_rms(data, rate, start, end):
+        i0 = max(0, int(start * rate))
+        i1 = min(len(data), int(end * rate))
+        if i1 <= i0:
+            return 0.0
+        return float(np.sqrt(np.mean(data[i0:i1] ** 2)))
+
+    for seg in segments:
+        start, end = seg.get("start"), seg.get("end")
+        if start is None or end is None:
+            continue
+        m = seg_rms(mic_data, mic_rate, start, end)
+        l = seg_rms(loop_data, loop_rate, start, end)
+        m_act = m / mic_ref
+        l_act = l / loop_ref
+        if m > SILENCE_RMS and m_act > l_act * DOMINANCE:
+            seg["speaker"] = "Joe"
+        elif l > SILENCE_RMS and l_act > m_act * DOMINANCE:
+            seg.setdefault("speaker", "Them")
+        # Ambiguous (crosstalk/overlap): keep whatever diarization said, if anything.
 
 
 def transcribe_recording(loopback_rate, mic_rate):
@@ -1024,7 +1084,9 @@ def transcribe_recording(loopback_rate, mic_rate):
     print(f"  Loopback signal: peak={loop_peak:.4f}  rms={loop_rms:.5f}  samples={loop_samples}")
     print(f"  Mic signal     : peak={mic_peak:.4f}  rms={mic_rms:.5f}  samples={mic_samples}")
 
-    # Save loopback and mic separately so we can diagnose which side was silent
+    # Save loopback and mic separately so we can diagnose which side was silent.
+    # The mono arrays are kept for channel-based speaker labelling after Whisper.
+    loop_data = mic_data = None
     if loop_samples:
         loop_path = OUTPUT_DIR / f"audio_{timestamp}_loopback.wav"
         loop_data = np.concatenate(loopback_chunks, axis=0)
@@ -1069,29 +1131,39 @@ def transcribe_recording(loopback_rate, mic_rate):
         np.arange(len(mixed)),
         mixed
     ).astype(np.float32)
-    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
-    print(f"Transcribing with whisperx {WHISPER_MODEL} on {gpu_name}...")
+    dev, compute_type, gpu_name = device_info()
+    print(f"Transcribing with whisperx {WHISPER_MODEL} on {gpu_name or 'CPU'}...")
 
     try:
         import whisperx  # lazy — see import note at top of file
         if whisper_model is None:
-            whisper_model = whisperx.load_model(WHISPER_MODEL, DEVICE, compute_type=COMPUTE_TYPE)
+            whisper_model = whisperx.load_model(WHISPER_MODEL, dev, compute_type=compute_type)
 
         audio = load_audio_file(audio_path)
-        result = whisper_model.transcribe(audio, batch_size=16 if DEVICE == "cuda" else 4, language="en")
+        result = whisper_model.transcribe(audio, batch_size=16 if dev == "cuda" else 4, language="en")
 
         # Align for accurate word timestamps (align model cached across recordings)
         model_a, metadata = get_align_model()
-        result = whisperx.align(result["segments"], model_a, metadata, audio, device=DEVICE,
+        result = whisperx.align(result["segments"], model_a, metadata, audio, device=dev,
                                 return_char_alignments=False)
 
-        # Speaker diarization if HF token is set
+        # Speaker diarization if HF token is set. Never fatal: a bad token or
+        # un-accepted gated model must not cost us the whole transcript.
         if HF_TOKEN:
             print("Diarizing speakers...")
-            from whisperx.diarize import DiarizationPipeline
-            diarize_model    = DiarizationPipeline(token=HF_TOKEN, device=DEVICE)
-            diarize_segments = diarize_model(str(audio_path))
-            result           = whisperx.assign_word_speakers(diarize_segments, result)
+            try:
+                from whisperx.diarize import DiarizationPipeline
+                diarize_model    = DiarizationPipeline(token=HF_TOKEN, device=dev)
+                diarize_segments = diarize_model(str(audio_path))
+                result           = whisperx.assign_word_speakers(diarize_segments, result)
+            except Exception as e:
+                print(f"  Diarization failed ({e}) — continuing without per-voice labels.")
+
+        # Channel-based labelling: the mic stream is Joe, the loopback is everyone
+        # else. Overrides/complements diarization using per-segment stream energy.
+        print("Labelling speakers by channel (mic → Joe)...")
+        label_speakers_by_channel(result["segments"], loop_data, loopback_rate,
+                                  mic_data, mic_rate)
 
         # Build transcript string
         lines = []
@@ -1113,7 +1185,11 @@ def transcribe_recording(loopback_rate, mic_rate):
             current_status = "error"
 
     except Exception as e:
+        # Full traceback, not just str(e) — a bare message like "" or an obscure
+        # CUDA/pyannote error is useless when trying to recover an important call.
+        import traceback
         print(f"Transcription error: {e}")
+        traceback.print_exc()
         current_status = "error"
 
     # Signal that transcription is done — /format can now proceed
@@ -1131,15 +1207,32 @@ def format_with_claude(role, fmt):
     if current_status == "error_silent_audio" or not last_transcript:
         # Write a clearly-labelled markdown so the failure is visible in the
         # recordings folder instead of silently producing nothing.
+        #
+        # These are two very different failures and must not share a message: a
+        # genuinely silent capture means the audio is gone, whereas a transcription
+        # failure leaves the recorded WAVs on disk and is fully recoverable. Saying
+        # "silence" for both sends you hunting a device problem that isn't there.
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        out_path = OUTPUT_DIR / f"meeting_{timestamp}_NO_AUDIO.md"
-        msg = ("Both the system-audio loopback and the mic captured silence "
-               "(peak amplitude < 0.005). Whisper was skipped to avoid the "
-               "well-known 'Thank you.' silence hallucination.\n\n"
-               "Run `python diagnose_audio.py` from the listener folder to "
-               "find out which side is broken.")
+        silent = (current_status == "error_silent_audio")
+        suffix = "NO_AUDIO" if silent else "TRANSCRIPTION_FAILED"
+        out_path = OUTPUT_DIR / f"meeting_{timestamp}_{suffix}.md"
+        if silent:
+            msg = ("Both the system-audio loopback and the mic captured silence "
+                   "(peak amplitude < 0.005). Whisper was skipped to avoid the "
+                   "well-known 'Thank you.' silence hallucination.\n\n"
+                   "Run `python diagnose_audio.py` from the listener folder to "
+                   "find out which side is broken.")
+        else:
+            msg = ("The audio recorded fine, but transcription produced no text — "
+                   "Whisper or one of the later steps failed.\n\n"
+                   "**Your audio is NOT lost.** The recording is still in the "
+                   "`recordings` folder as `audio_<timestamp>.mp3`, plus separate "
+                   "`_mic.wav` and `_loopback.wav` files. Re-run it through the "
+                   "**Upload** button in the recorder UI to transcribe it again.\n\n"
+                   "See `listener.log` for the error that caused this.")
         out_path.write_text(
-            f"# Meeting — {datetime.now().strftime('%d %B %Y, %H:%M')} (NO AUDIO)\n\n{msg}\n",
+            f"# Meeting — {datetime.now().strftime('%d %B %Y, %H:%M')} "
+            f"({'NO AUDIO' if silent else 'TRANSCRIPTION FAILED'})\n\n{msg}\n",
             encoding="utf-8"
         )
         last_summary = msg
@@ -1168,10 +1261,12 @@ def format_with_claude(role, fmt):
 photographer, and musician based in Sydney, Australia. He works across projection design,
 animation, content creation, and video production.
 
-The transcript may contain speaker labels like [SPEAKER_00], [SPEAKER_01], etc.
-Read through the transcript and identify speakers by name where they are addressed or
-introduce themselves (e.g. "Thanks Joe", "Peter, do you want to...", "Hi, I'm Lucy").
-Replace [SPEAKER_XX] labels with the person's actual name wherever you can identify them.
+The transcript may contain speaker labels like [Joe], [Them], [SPEAKER_00], [SPEAKER_01], etc.
+[Joe] segments were captured from Joe's own microphone, so that label is reliable.
+[Them] means the other side of the call (no per-person separation was available).
+Read through the transcript and identify [Them]/[SPEAKER_XX] speakers by name where they are
+addressed or introduce themselves (e.g. "Thanks Joe", "Peter, do you want to...", "Hi, I'm Lucy").
+Replace those labels with the person's actual name wherever you can identify them.
 For any speakers you cannot identify, use a short description (e.g. "Unknown" or keep the label).
 Joe is usually the person recording — he is likely the one presenting or being referred to as the creative lead.
 
@@ -1374,23 +1469,27 @@ class Handler(BaseHTTPRequestHandler):
                 global current_status, last_transcript, whisper_model
                 try:
                     import whisperx  # lazy — see import note at top of file
+                    dev, compute_type, _ = device_info()
                     if whisper_model is None:
                         print("  Loading whisperx model...")
-                        whisper_model = whisperx.load_model(WHISPER_MODEL, DEVICE, compute_type=COMPUTE_TYPE)
+                        whisper_model = whisperx.load_model(WHISPER_MODEL, dev, compute_type=compute_type)
                     print("  Loading audio...")
                     audio    = load_audio_file(out_path)
                     print("  Transcribing... (this takes a few minutes on GPU)")
-                    result   = whisper_model.transcribe(audio, batch_size=16 if DEVICE == "cuda" else 4, language="en")
+                    result   = whisper_model.transcribe(audio, batch_size=16 if dev == "cuda" else 4, language="en")
                     print("  Aligning timestamps...")
                     model_a, metadata = get_align_model()
-                    result   = whisperx.align(result["segments"], model_a, metadata, audio, device=DEVICE,
+                    result   = whisperx.align(result["segments"], model_a, metadata, audio, device=dev,
                                               return_char_alignments=False)
                     if HF_TOKEN:
                         print("  Diarizing speakers...")
-                        from whisperx.diarize import DiarizationPipeline
-                        dm     = DiarizationPipeline(token=HF_TOKEN, device=DEVICE)
-                        dsegs  = dm(str(out_path))
-                        result = whisperx.assign_word_speakers(dsegs, result)
+                        try:
+                            from whisperx.diarize import DiarizationPipeline
+                            dm     = DiarizationPipeline(token=HF_TOKEN, device=dev)
+                            dsegs  = dm(str(out_path))
+                            result = whisperx.assign_word_speakers(dsegs, result)
+                        except Exception as e:
+                            print(f"  Diarization failed ({e}) — continuing without per-voice labels.")
 
                     lines, cur_spk = [], None
                     for seg in result["segments"]:
@@ -1439,6 +1538,18 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json({"ok": True,
                             "manual_loopback_id": manual_loopback_id,
                             "manual_mic_id": manual_mic_id})
+            return
+
+        if path == "/clear":
+            # Discard the held transcript/summary so a fresh page load starts
+            # clean (the UI's ✕ Clear calls this). No-op while work is in flight.
+            if current_status in ("recording", "transcribing", "processing"):
+                self.send_json({"error": "Busy — cannot clear right now"}); return
+            last_summary    = ""
+            last_transcript = ""
+            last_saved_path = ""
+            current_status  = "idle"
+            self.send_json({"ok": True, "status": "idle"})
             return
 
         if path == "/test-signal":
@@ -1759,7 +1870,10 @@ def main():
 
     _, _, mic_id, mic_name = get_devices()
     print(f"  Mic      : {mic_name or 'Not found'}" + (f" (#{mic_id})" if mic_id is not None else ""))
-    print(f"  GPU      : {torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'None — using CPU'}")
+    # device_info() imports torch (~1.5s). Deliberately called here, after the
+    # server is already serving and the browser has been opened, so it costs the
+    # user nothing.
+    print(f"  GPU      : {device_info()[2] or 'None — using CPU'}")
     print()
 
     try:

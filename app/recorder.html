@@ -359,6 +359,30 @@ header {
 .btn.danger { border-color: transparent; color: var(--muted); }
 .btn.danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); }
 
+/* The record button is a single toggle: it turns red and becomes "Stop &
+   Summarise" while a capture is live, so the control always reflects what is
+   actually happening rather than sitting there still reading "Start". */
+.btn.recording {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+  font-weight: 500;
+  animation: recPulse 2s ease-in-out infinite;
+}
+.btn.recording:hover:not(:disabled) {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+  filter: brightness(1.1);
+}
+@keyframes recPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,59,0.45); }
+  50%      { box-shadow: 0 0 14px 3px rgba(255,59,59,0.28); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn.recording { animation: none; }
+}
+
 .btn:disabled { opacity: 0.22; cursor: not-allowed; }
 
 /* ── CENTER ───────────────────────────────────── */
@@ -799,9 +823,8 @@ header {
     </div>
 
     <div class="controls">
-      <button class="btn primary" id="startBtn" onclick="startRecording()">▶ Start Recording</button>
+      <button class="btn primary" id="recBtn" onclick="toggleRecording()">▶ Start Recording</button>
       <button class="btn" id="pauseBtn" onclick="togglePause()" disabled>⏸ Pause</button>
-      <button class="btn" id="stopBtn" onclick="promptFormat()" disabled>■ Stop &amp; Summarise</button>
       <button class="btn danger" id="clearBtn" onclick="clearAll()">✕ Clear</button>
       <button class="btn" id="uploadBtn" onclick="document.getElementById('wavUploadInput').click()">⬆ Upload WAV</button>
       <input type="file" id="wavUploadInput" accept=".wav" style="display:none" onchange="uploadWav(this)">
@@ -1178,6 +1201,7 @@ async function saveToNotion() {
 // ── Boot ───────────────────────────────────────
 window.onload = () => {
   document.getElementById('serverDown').classList.remove('visible');
+  renderControls();
   checkServer();
   const nk = getKey('notion');
   if (nk) document.getElementById('notionTokenField').value = nk;
@@ -1207,6 +1231,7 @@ window.onload = () => {
 };
 
 let calendarCheckedOnce = false;
+let resumeCheckedOnce   = false;
 async function checkServer() {
   try {
     const res = await fetch(`${API}/status`);
@@ -1223,6 +1248,19 @@ async function checkServer() {
     if (!calendarCheckedOnce) {
       calendarCheckedOnce = true;
       loadCalendarMeeting();
+    }
+    // Resume an in-flight session after a page (re)load — the server may already
+    // be transcribing, formatting, or holding a finished transcript waiting for
+    // a format choice. Without this a refresh looks like everything was lost.
+    if (!resumeCheckedOnce) {
+      resumeCheckedOnce = true;
+      if (['transcribing', 'processing', 'awaiting_format', 'done'].includes(data.status)) {
+        if (data.status === 'transcribing' || data.status === 'processing') {
+          state = 'transcribing';
+          setStatus('transcribing', data.status === 'processing' ? 'FORMATTING…' : 'TRANSCRIBING…');
+        }
+        pollForResult();
+      }
     }
     setTimeout(refreshStatus, 5000);
   } catch(e) {
@@ -1370,14 +1408,14 @@ async function togglePause() {
     state = 'paused';
     setStatus('paused', 'PAUSED');
     stopTimer(); stopWave();
-    document.getElementById('pauseBtn').textContent = '▶ Resume';
+    renderControls();
   } else if (state === 'paused') {
     await fetch(`${API}/resume`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
     state = 'recording';
     setStatus('recording', 'RECORDING');
     startTs = Date.now() - elapsed * 1000;
     startTimer(); startWave();
-    document.getElementById('pauseBtn').textContent = '⏸ Pause';
+    renderControls();
   }
 }
 
@@ -1387,7 +1425,6 @@ async function promptFormat() {
 
   // 1. Stop recording immediately
   stopTimer(); stopWave();
-  setButtons(true, true, true);
   try {
     await fetch(`${API}/stop`, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
@@ -1395,6 +1432,7 @@ async function promptFormat() {
   } catch(e) { toast('Server error'); return; }
   state = 'transcribing';
   setStatus('processing', 'TRANSCRIBING');
+  renderControls();   // after the state change, so the button reflects it
 
   // 2. Open format modal — user picks while Whisper runs
   document.getElementById('fmodalNote').style.display = '';
@@ -1484,6 +1522,9 @@ function clearAll() {
   setStatus('', 'IDLE');
   setButtons(false, true, true);
   document.getElementById('pauseBtn').textContent = '⏸ Pause';
+  // Also clear the server-held transcript/summary so a page refresh doesn't
+  // resurrect a session the user explicitly dismissed.
+  fetch(`${API}/clear`, { method: 'POST' }).catch(() => {});
 }
 
 // ── Upload existing WAV ────────────────────────
@@ -1496,8 +1537,8 @@ async function uploadWav(input) {
 
   clearAll();
   setStatus('uploading', 'UPLOADING…');
-  document.getElementById('startBtn').disabled = true;
-  document.getElementById('uploadBtn').disabled = true;
+  state = 'uploading';
+  renderControls();
 
   const form = new FormData();
   form.append('file', file, file.name);
@@ -1512,8 +1553,8 @@ async function uploadWav(input) {
     pollForResult();
   } catch (e) {
     setStatus('', 'IDLE');
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('uploadBtn').disabled = false;
+    state = 'idle';
+    renderControls();
     toast('Upload failed: ' + e.message);
   }
 }
@@ -1528,8 +1569,7 @@ async function pollForResult() {
       state = 'stopped';
       setStatus('', 'TRANSCRIBED');
       if (data.transcript) renderServerTranscript(data.transcript);
-      document.getElementById('startBtn').disabled = false;
-      document.getElementById('uploadBtn').disabled = false;
+      renderControls();
       reopenFormatModal();
       return;
     }
@@ -1647,10 +1687,37 @@ function setStatus(cls, text) {
   document.getElementById('dot').className = 'dot ' + cls;
   document.getElementById('statusText').textContent = text;
 }
+// Single source of truth for the controls: everything is derived from `state`,
+// so the buttons can never disagree with what the server is actually doing.
+// (The old setButtons(start, pause, stop) took three independent flags and one
+// call passed the wrong ones, leaving "Start Recording" live and enabled during
+// a recording.)
+function renderControls() {
+  const rec   = document.getElementById('recBtn');
+  const pause = document.getElementById('pauseBtn');
+  const up    = document.getElementById('uploadBtn');
+  const live  = (state === 'recording' || state === 'paused');
+  const busy  = (state === 'transcribing' || state === 'processing' || state === 'uploading');
+
+  rec.textContent = live ? '■ Stop & Summarise' : '▶ Start Recording';
+  rec.classList.toggle('primary',   !live);
+  rec.classList.toggle('recording',  live);
+  rec.disabled = busy;
+
+  pause.disabled    = !live;
+  pause.textContent = (state === 'paused') ? '▶ Resume' : '⏸ Pause';
+
+  if (up) up.disabled = live || busy;
+}
+
+function toggleRecording() {
+  if (state === 'recording' || state === 'paused') promptFormat();
+  else startRecording();
+}
+
+// Back-compat shim for older call sites; ignores the flags and re-derives.
 function setButtons(startDis, pauseDis, stopDis) {
-  document.getElementById('startBtn').disabled = startDis;
-  document.getElementById('pauseBtn').disabled = pauseDis;
-  document.getElementById('stopBtn').disabled  = stopDis;
+  renderControls();
 }
 function startTimer() {
   timerInt = setInterval(() => {
