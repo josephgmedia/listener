@@ -13,6 +13,19 @@ logging.getLogger("lightning").setLevel(logging.ERROR)
 logging.getLogger("lightning_fabric").setLevel(logging.ERROR)
 logging.getLogger("pyannote").setLevel(logging.ERROR)
 
+# When the launcher redirects this process's stdout into listener.log, Windows
+# encodes it with the ANSI codepage (cp1252). Any print() holding a character
+# cp1252 cannot represent then raises UnicodeEncodeError — and since the
+# transcription pipeline runs inside a try/except, a single character in a log
+# message was enough to throw away a finished 37-minute transcript. Force UTF-8
+# and make unencodable characters non-fatal rather than destructive.
+import sys
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass  # None or not a real stream (windowed exe) — nothing to reconfigure
+
 import anthropic
 # NOTE: whisperx is imported lazily inside the transcription functions, not here.
 # It drags in torch/faster-whisper/pyannote/lightning/transformers — a ~10-30s
@@ -232,6 +245,97 @@ def detect_pyaudio_loopback():
         print(f"  pyaudiowpatch loopback detection error: {e}")
 
     return None, None, 48000
+
+
+DEVICE_PREFS_PATH = Path(__file__).parent / "device_prefs.json"
+
+
+def _device_ref_for(idx):
+    """{'name', 'api'} for a device index — what we persist instead of the index."""
+    try:
+        devs = sd.query_devices()
+        apis = sd.query_hostapis()
+        if idx is not None and 0 <= idx < len(devs):
+            d = devs[idx]
+            return {"name": d["name"], "api": apis[d["hostapi"]]["name"]}
+    except Exception:
+        pass
+    return None
+
+
+def _input_index_for_ref(ref):
+    """Resolve a saved {'name','api'} back to a current input device index.
+
+    The same physical input is exposed once per host API (MME, DirectSound,
+    WASAPI, WDM-KS), and they are not interchangeable, so match the API too and
+    only fall back to a name-only match if that exact pairing has gone.
+    """
+    if not ref:
+        return None
+    if isinstance(ref, str):          # legacy format: bare name
+        ref = {"name": ref, "api": None}
+    try:
+        devs = sd.query_devices()
+        apis = sd.query_hostapis()
+    except Exception:
+        return None
+    fallback = None
+    for i, d in enumerate(devs):
+        if d["name"] != ref.get("name") or d["max_input_channels"] <= 0:
+            continue
+        if ref.get("api") and apis[d["hostapi"]]["name"] == ref["api"]:
+            return i
+        if fallback is None:
+            fallback = i
+    return fallback
+
+
+def save_device_prefs():
+    """Persist the manual device choices BY NAME.
+
+    Indices are not stable: the same Focusrite input has appeared as #6, #10 and
+    #68 across enumerations, so an index saved today can point at something else
+    tomorrow. Names survive re-enumeration.
+    """
+    try:
+        DEVICE_PREFS_PATH.write_text(json.dumps({
+            "loopback": _device_ref_for(manual_loopback_id),
+            "mic":      _device_ref_for(manual_mic_id),
+        }, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"  [prefs] could not save device prefs: {e}")
+
+
+def load_device_prefs():
+    """Restore the manual device choices saved by save_device_prefs().
+
+    These used to live only in module globals, so every server restart silently
+    reverted to auto-detect. On 2026-08-18 that cost a 37-minute call its mic
+    track: the chosen Focusrite input fell back to a digital interface that
+    recorded nothing but a noise floor, and it was only discoverable afterwards.
+    """
+    global manual_loopback_id, manual_mic_id
+    try:
+        if not DEVICE_PREFS_PATH.exists():
+            return
+        data = json.loads(DEVICE_PREFS_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"  [prefs] could not read device prefs: {e}")
+        return
+    for key in ("loopback", "mic"):
+        ref = data.get(key)
+        if not ref:
+            continue
+        name = ref.get("name") if isinstance(ref, dict) else ref
+        idx = _input_index_for_ref(ref)
+        if idx is None:
+            print(f"  [prefs] saved {key} device not connected: {name!r} - auto-detecting")
+            continue
+        if key == "loopback":
+            manual_loopback_id = idx
+        else:
+            manual_mic_id = idx
+        print(f"  [prefs] {key}: {name} (#{idx})")
 
 
 def get_devices(refresh=False):
@@ -1025,6 +1129,20 @@ def label_speakers_by_channel(segments, loop_data, loop_rate, mic_data, mic_rate
     side is labelled "Them"."""
     if loop_data is None or mic_data is None or not len(loop_data) or not len(mic_data):
         return
+
+    # A stream carrying only a noise floor must not be labelled at all. Activity
+    # below is measured RELATIVE to each stream's own level, so a mic that
+    # recorded nothing but hiss would still "win" segments and confidently
+    # attribute other people's words to Joe. That happened on 2026-08-18, when
+    # the mic had silently reverted to the wrong device: every loud patch of
+    # noise stole a line. Require real signal before trusting either stream.
+    MIN_STREAM_PEAK = 0.02
+    for name, data in (("mic", mic_data), ("loopback", loop_data)):
+        if float(np.max(np.abs(data))) < MIN_STREAM_PEAK:
+            print(f"  [labels] {name} stream has no usable speech "
+                  f"(peak {float(np.max(np.abs(data))):.4f}) - skipping channel labelling")
+            return
+
     SILENCE_RMS = 0.002   # below this a stream isn't speaking at all
     DOMINANCE   = 1.5     # how much more active a stream must be to claim a segment
 
@@ -1161,7 +1279,7 @@ def transcribe_recording(loopback_rate, mic_rate):
 
         # Channel-based labelling: the mic stream is Joe, the loopback is everyone
         # else. Overrides/complements diarization using per-segment stream energy.
-        print("Labelling speakers by channel (mic → Joe)...")
+        print("Labelling speakers by channel (mic -> Joe)...")
         label_speakers_by_channel(result["segments"], loop_data, loopback_rate,
                                   mic_data, mic_rate)
 
@@ -1535,6 +1653,7 @@ class Handler(BaseHTTPRequestHandler):
             if "mic_id" in body:
                 manual_mic_id = _norm(body.get("mic_id"))
             get_devices(refresh=True)  # refresh auto-detect cache for /status
+            save_device_prefs()        # so the choice survives a server restart
             self.send_json({"ok": True,
                             "manual_loopback_id": manual_loopback_id,
                             "manual_mic_id": manual_mic_id})
@@ -1839,6 +1958,10 @@ def main():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     _t.Thread(target=server.serve_forever, daemon=True).start()
 
+    # Restore the saved device choices immediately, before any recording can be
+    # started from the UI.
+    load_device_prefs()
+
     # Open the browser ourselves when run directly (launch.bat / python).
     # The .exe launcher opens it instead and sets LISTENER_NO_BROWSER to avoid
     # a duplicate tab.
@@ -1868,8 +1991,10 @@ def main():
         _, loopback_name, _, _ = get_devices(refresh=True)
         print(f"  Loopback : {loopback_name or 'Not found'}")
 
-    _, _, mic_id, mic_name = get_devices()
-    print(f"  Mic      : {mic_name or 'Not found'}" + (f" (#{mic_id})" if mic_id is not None else ""))
+    _mic = resolve_mic()
+    print(f"  Mic      : {_mic['name'] or 'Not found'}"
+          + (f" (#{_mic['id']})" if _mic["id"] is not None else "")
+          + ("  [manual]" if manual_mic_id is not None else "  [auto]"))
     # device_info() imports torch (~1.5s). Deliberately called here, after the
     # server is already serving and the browser has been opened, so it costs the
     # user nothing.
